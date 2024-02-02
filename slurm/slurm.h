@@ -668,16 +668,11 @@ enum select_plugin_type {
 	/* 103 unused (originally used for BGQ) */
 	/* 104 unused (originally used for Cray/ALPS with select/linear) */
 	/* 105 unused (originally used for Cray/ALPS with select/cons_res) */
-	SELECT_PLUGIN_SERIAL         = 106, /* Serial */
-	SELECT_PLUGIN_CRAY_LINEAR    = 107, /* Linear on a Native Cray */
-	/*
-	 * 108 cons_res on a cray was removed in 23.11. However, this is needed
-	 * for systems that are upgrading from an older version and were using
-	 * cons_res. This can be removed two versions after 23.11.
-	 */
-	SELECT_PLUGIN_CRAY_CONS_RES  = 108, /* Cons Res on a Native Cray */
+	/* 106 unused (originally used for Serial) */
+	/* 107 unused (originally used for Cray Aries with select/linear) */
+	/* 108 unused (originally used for Cray Aries with select/cons_res) */
 	SELECT_PLUGIN_CONS_TRES      = 109, /* Cons TRES on a normal system */
-	SELECT_PLUGIN_CRAY_CONS_TRES = 110  /* Cons TRES on a Native Cray */
+	/* 110 unused (originally used for Cray Aries with select/cons_tres) */
 };
 
 /* switch plugin (id) in use by cluster */
@@ -1026,8 +1021,8 @@ enum node_states {
 #define CR_MEMORY	0x0010	/* Memory as consumable resources. Memory is
 				 * not over-committed when selected as a CR. */
 /* was CR_OTHER_CONS_RES    0x0020, removed v23.11 */
-/* was CR_NHC_STEP_NO 0x0040, removed v19.05 */
-/* was CR_NHC_NO 0x0080, removed v19.05 */
+#define ENFORCE_BINDING_GRES 0x0040
+#define ONE_TASK_PER_SHARING_GRES 0x0080
 
 /* By default, schedule only one task per core.
  * Without this option, tasks would be allocated threads. */
@@ -1038,9 +1033,7 @@ enum node_states {
 #define CR_PACK_NODES  0x0200
 
 #define LL_SHARED_GRES 0x0400 /* Prefer least-loaded device for shared GRES */
-#define CR_OTHER_CONS_TRES   0x0800 /* if layering select plugins use
-				     * cons_tres instead of linear (default)
-				     */
+/* was CR_OTHER_CONS_TRES   0x0800, removed v24.08 */
 /* By default, distribute cores using a block approach inside the nodes */
 #define CR_CORE_DEFAULT_DIST_BLOCK 0x1000
 #define CR_LLN		0x4000  /* Select nodes by "least loaded." */
@@ -1113,7 +1106,10 @@ enum node_states {
 #define PRIORITY_FLAGS_NO_NORMAL_QOS	 SLURM_BIT(9)
 #define PRIORITY_FLAGS_NO_NORMAL_TRES	 SLURM_BIT(10)
 
-/* These bits are set in the bitflags field of job_desc_msg_t */
+/*
+ * These bits are set in the bitflags field of job_desc_msg_t and
+ * job_flags in slurm_opt_t
+ */
 #define KILL_INV_DEP       SLURM_BIT(0) /* Kill job on invalid dependency */
 #define NO_KILL_INV_DEP    SLURM_BIT(1) /* Don't kill job on invalid
 					 * dependency */
@@ -1164,6 +1160,10 @@ enum node_states {
 #define JOB_SEND_SCRIPT    SLURM_BIT(35) /* Send script to the dbd */
 #define RESET_LIC_TASK     SLURM_BIT(36) /* Reset licenses per task */
 #define RESET_LIC_JOB      SLURM_BIT(37) /* Reset licenses per job */
+#define GRES_ONE_TASK_PER_SHARING SLURM_BIT(38) /* Don't let tasks in the same
+						 * job share the same gres */
+#define GRES_MULT_TASKS_PER_SHARING SLURM_BIT(39)/* Negate
+						  * GRES_ONE_TASK_PER_SHARING */
 
 /* These bits are set in the x11 field of job_desc_msg_t */
 #define X11_FORWARD_ALL		0x0001	/* all nodes should setup forward */
@@ -2761,7 +2761,7 @@ typedef struct reservation_name_msg {
 #define DEBUG_FLAG_BURST_BUF    SLURM_BIT(40) /* Burst buffer plugin */
 #define DEBUG_FLAG_CPU_FREQ     SLURM_BIT(41) /* --cpu_freq debug */
 #define DEBUG_FLAG_POWER        SLURM_BIT(42) /* Power plugin debug */
-#define DEBUG_FLAG_TIME_CRAY    SLURM_BIT(43) /* Time Cray components */
+/* #define			SLURM_BIT(43) /\* UNUSED *\/ */
 #define DEBUG_FLAG_DB_ARCHIVE	SLURM_BIT(44) /* DBD Archiving/Purging */
 #define DEBUG_FLAG_DB_TRES      SLURM_BIT(45) /* Database TRES debug */
 #define DEBUG_FLAG_JOBCOMP      SLURM_BIT(46) /* JobComp debug */
@@ -2871,7 +2871,6 @@ typedef struct {
 	time_t boot_time;	/* time slurmctld last booted */
 	void *cgroup_conf;	/* cgroup support config file */
 	char *cli_filter_plugins; /* List of cli_filter plugins to use */
-	char *core_spec_plugin;	/* core specialization plugin name */
 	char *cluster_name;     /* general name of the entire cluster */
 	char *comm_params;     /* Communication parameters */
 	uint16_t complete_wait;	/* seconds to wait for job completion before

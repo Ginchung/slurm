@@ -7,7 +7,6 @@ SUBDIRS = \
 	auth			\
 	burst_buffer		\
 	cli_filter		\
-	core_spec		\
 	cred			\
 	data_parser		\
 	ext_sensors		\
@@ -21,7 +20,6 @@ SUBDIRS = \
 	mcs			\
 	mpi			\
 	node_features		\
-	power			\
 	preempt			\
 	prep			\
 	priority		\

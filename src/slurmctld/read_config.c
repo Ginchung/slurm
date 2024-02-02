@@ -1203,7 +1203,6 @@ static void _sync_steps_to_conf(job_record_t *job_ptr)
 	}
 
 	list_iterator_destroy (step_iterator);
-	return;
 }
 
 static int _sync_detail_bitmaps(job_record_t *job_ptr)
@@ -1574,8 +1573,20 @@ extern int read_slurm_conf(int recover)
 	}
 
 	/*
+	 * Node reordering may be done by the topology plugin.
+	 * Reordering the table must be done before hashing the
+	 * nodes, and before any position-relative bitmaps are created.
+	 *
+	 * Sort the nodes read in from the slurm.conf first before restoring
+	 * the dynamic nodes from the state file to prevent dynamic nodes from
+	 * being sorted -- which can cause problems with heterogenous jobs and
+	 * the order of the sockets changing on startup.
+	 */
+	_sort_node_record_table_ptr();
+
+	/*
 	 * Load node state which includes dynamic nodes so that dynamic nodes
-	 * can be sorted and included in topology.
+	 * can be included in topology.
 	 */
 	if (recover == 0) {		/* Build everything from slurm.conf */
 		_set_features(node_record_table_ptr, node_record_count,
@@ -1590,13 +1601,6 @@ extern int read_slurm_conf(int recover)
 		_set_features(NULL, 0, recover);
 		(void) load_all_front_end_state(false);
 	}
-
-	/*
-	 * Node reordering may be done by the topology plugin.
-	 * Reordering the table must be done before hashing the
-	 * nodes, and before any position-relative bitmaps are created.
-	 */
-	_sort_node_record_table_ptr();
 
 	rehash_node();
 	topology_g_build_config();
@@ -2470,7 +2474,7 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 	    (job_ptr->front_end_ptr != NULL))
 		job_ptr->front_end_ptr->job_cnt_run++;
 
-	set_job_alias_list(job_ptr);
+	set_initial_job_alias_list(job_ptr);
 
 	return cnt;
 }
@@ -2485,9 +2489,7 @@ static void _sync_nodes_to_suspended_job(job_record_t *job_ptr)
 		node_ptr->sus_job_cnt++;
 	}
 
-	set_job_alias_list(job_ptr);
-
-	return;
+	set_initial_job_alias_list(job_ptr);
 }
 
 /*

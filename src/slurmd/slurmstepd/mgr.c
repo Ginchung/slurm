@@ -95,7 +95,6 @@
 #include "src/common/xstring.h"
 
 #include "src/interfaces/acct_gather_profile.h"
-#include "src/interfaces/core_spec.h"
 #include "src/interfaces/cred.h"
 #include "src/interfaces/gpu.h"
 #include "src/interfaces/gres.h"
@@ -1030,16 +1029,8 @@ static int _spawn_job_container(stepd_step_rec_t *step)
 	int status = 0;
 	pid_t pid;
 	int rc = SLURM_SUCCESS;
-	uint32_t jobid;
+	uint32_t jobid = step->step_id.job_id;
 
-#ifdef HAVE_NATIVE_CRAY
-	if (step->het_job_id && (step->het_job_id != NO_VAL))
-		jobid = step->het_job_id;
-	else
-		jobid = step->step_id.job_id;
-#else
-	jobid = step->step_id.job_id;
-#endif
 	if (container_g_stepd_create(jobid, step)) {
 		error("%s: container_g_stepd_create(%u): %m", __func__, jobid);
 		return SLURM_ERROR;
@@ -1169,7 +1160,6 @@ static int _spawn_job_container(stepd_step_rec_t *step)
 	jobacct_id.step = step;
 	jobacct_gather_set_proctrack_container_id(step->cont_id);
 	jobacct_gather_add_task(pid, &jobacct_id, 1);
-	container_g_add_cont(jobid, step->cont_id);
 
 	set_job_state(step, SLURMSTEPD_STEP_RUNNING);
 	if (!slurm_conf.job_acct_gather_freq)
@@ -1584,7 +1574,6 @@ static int _pre_task_child_privileged(
 
 	set_oom_adj(0); /* the tasks may be killed by OOM */
 
-#ifndef HAVE_NATIVE_CRAY
 	if (!(step->flags & LAUNCH_NO_ALLOC)) {
 		/* Add job's pid to job container, if a normal job */
 		if (container_g_join(step->step_id.job_id, step->uid)) {
@@ -1600,7 +1589,6 @@ static int _pre_task_child_privileged(
 		 */
 		setwd = 1;
 	}
-#endif
 
 	if (spank_task_privileged(step, taskid) < 0)
 		return error("spank_task_init_privileged failed");
@@ -1831,7 +1819,6 @@ _fork_all_tasks(stepd_step_rec_t *step, bool *io_initialized)
 	struct priv_state sprivs;
 	jobacct_id_t jobacct_id;
 	List exec_wait_list = NULL;
-	uint32_t jobid;
 	uint32_t node_offset = 0, task_offset = 0;
 
 	if (step->het_job_node_offset != NO_VAL)
@@ -2139,20 +2126,6 @@ _fork_all_tasks(stepd_step_rec_t *step, bool *io_initialized)
 		}
 	}
 //	jobacct_gather_set_proctrack_container_id(step->cont_id);
-#ifdef HAVE_NATIVE_CRAY
-	if (step->het_job_id && (step->het_job_id != NO_VAL))
-		jobid = step->het_job_id;
-	else
-		jobid = step->step_id.job_id;
-#else
-	jobid = step->step_id.job_id;
-#endif
-	if (container_g_add_cont(jobid, step->cont_id) != SLURM_SUCCESS)
-		error("container_g_add_cont(%u): %m", step->step_id.job_id);
-	if (!step->batch && (step->step_id.step_id != SLURM_INTERACTIVE_STEP) &&
-	    core_spec_g_set(step->cont_id, step->job_core_spec) &&
-	    (step->step_id.step_id == 0))
-		error("core_spec_g_set: %m");
 
 	/*
 	 * Now it's ok to unblock the tasks, so they may call exec.
@@ -2901,25 +2874,17 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *step,
 	if ((cpid = _exec_wait_get_pid (ei)) == 0) {
 		struct priv_state sprivs;
 		char *argv[2];
-		uint32_t jobid;
 
-#ifdef HAVE_NATIVE_CRAY
-		if (step->het_job_id && (step->het_job_id != NO_VAL))
-			jobid = step->het_job_id;
-		else
-			jobid = step->step_id.job_id;
-#else
-		jobid = step->step_id.job_id;
-#endif
 		/* container_g_join needs to be called in the
 		   forked process part of the fork to avoid a race
 		   condition where if this process makes a file or
 		   detacts itself from a child before we add the pid
 		   to the container in the parent of the fork.
 		*/
-		if ((jobid != 0) &&	/* Ignore system processes */
+		/* Ignore system processes */
+		if ((step->step_id.job_id != 0) &&
 		    !(step->flags & LAUNCH_NO_ALLOC) &&
-		    (container_g_join(jobid, step->uid) != SLURM_SUCCESS))
+		    (container_g_join(step->step_id.job_id, step->uid)))
 			error("container_g_join(%u): %m", step->step_id.job_id);
 
 		argv[0] = (char *)xstrdup(path);

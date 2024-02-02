@@ -394,6 +394,12 @@ extern void run_health_check(void)
 	char *host_str = NULL;
 	agent_arg_t *check_agent_args = NULL;
 
+	check_agent_args = xmalloc (sizeof (agent_arg_t));
+	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
+	check_agent_args->retry = 0;
+	check_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
+	check_agent_args->hostlist = hostlist_create(NULL);
+
 	/* Sync plugin internal data with
 	 * node select_nodeinfo. This is important
 	 * after reconfig otherwise select_nodeinfo
@@ -403,11 +409,6 @@ extern void run_health_check(void)
 	select_g_select_nodeinfo_set_all();
 
 #ifdef HAVE_FRONT_END
-	check_agent_args = xmalloc (sizeof (agent_arg_t));
-	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
-	check_agent_args->retry = 0;
-	check_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
-	check_agent_args->hostlist = hostlist_create(NULL);
 	for (i = 0, front_end_ptr = front_end_nodes;
 	     i < front_end_node_cnt; i++, front_end_ptr++) {
 		if (IS_NODE_NO_RESPOND(front_end_ptr))
@@ -444,19 +445,17 @@ extern void run_health_check(void)
 		node_limit = MAX(node_limit, 10);
 	}
 
-	check_agent_args = xmalloc (sizeof (agent_arg_t));
-	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
-	check_agent_args->retry = 0;
-	check_agent_args->protocol_version = SLURM_PROTOCOL_VERSION;
-	check_agent_args->hostlist = hostlist_create(NULL);
 	for (; (node_ptr = next_node(&base_node_loc)); base_node_loc++) {
 		if (run_cyclic &&
 		    (node_test_cnt++ >= node_limit))
 				break;
-		if (IS_NODE_NO_RESPOND(node_ptr) ||
-		    IS_NODE_FUTURE(node_ptr) ||
+		if (IS_NODE_FUTURE(node_ptr) ||
+		    IS_NODE_INVALID_REG(node_ptr) ||
+		    IS_NODE_NO_RESPOND(node_ptr) ||
+		    IS_NODE_POWERED_DOWN(node_ptr) ||
 		    IS_NODE_POWERING_DOWN(node_ptr) ||
-		    IS_NODE_POWERED_DOWN(node_ptr))
+		    IS_NODE_POWERING_UP(node_ptr) ||
+		    IS_NODE_REBOOT_ISSUED(node_ptr))
 			continue;
 		if (node_states != HEALTH_CHECK_NODE_ANY) {
 			uint16_t cpus_total, cpus_used = 0;
@@ -502,7 +501,7 @@ extern void run_health_check(void)
 		if (PACK_FANOUT_ADDRS(node_ptr))
 			check_agent_args->msg_flags |= SLURM_PACK_ADDRS;
 	}
-	if (base_node_loc >= node_record_count)
+	if (!node_ptr)
 		base_node_loc = 0;
 #endif
 
@@ -554,10 +553,13 @@ extern void update_nodes_acct_gather_data(void)
 	}
 #else
 	for (i = 0; (node_ptr = next_node(&i)); i++) {
-		if (IS_NODE_NO_RESPOND(node_ptr) ||
-		    IS_NODE_FUTURE(node_ptr) ||
+		if (IS_NODE_FUTURE(node_ptr) ||
+		    IS_NODE_INVALID_REG(node_ptr) ||
+		    IS_NODE_NO_RESPOND(node_ptr) ||
+		    IS_NODE_POWERED_DOWN(node_ptr) ||
 		    IS_NODE_POWERING_DOWN(node_ptr) ||
-		    IS_NODE_POWERED_DOWN(node_ptr))
+		    IS_NODE_POWERING_UP(node_ptr) ||
+		    IS_NODE_REBOOT_ISSUED(node_ptr))
 			continue;
 		if (agent_args->protocol_version > node_ptr->protocol_version)
 			agent_args->protocol_version =

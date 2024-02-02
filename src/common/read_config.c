@@ -252,7 +252,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"BcastParameters", S_P_STRING},
 	{"BurstBufferParameters", S_P_STRING},
 	{"BurstBufferType", S_P_STRING},
-	{"CoreSpecPlugin", S_P_STRING},
+	{"CoreSpecPlugin", S_P_STRING, _defunct_option},
 	{"CliFilterPlugins", S_P_STRING},
 	{"ClusterName", S_P_STRING},
 	{"CommunicationParameters", S_P_STRING},
@@ -498,9 +498,8 @@ static int _defunct_option(void **dest, slurm_parser_enum_t type,
 			  const char *key, const char *value,
 			  const char *line, char **leftover)
 {
-	if (running_in_daemon())
-		error("The option \"%s\" is defunct, please remove it from slurm.conf.",
-		      key);
+	error_in_daemon("The option \"%s\" is defunct, please remove it from slurm.conf.",
+			key);
 	return 0;
 }
 
@@ -2899,7 +2898,6 @@ extern void free_slurm_conf(slurm_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->comm_params);
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
-	xfree (ctl_conf_ptr->core_spec_plugin);
 	xfree (ctl_conf_ptr->cred_type);
 	xfree (ctl_conf_ptr->dependency_params);
 	xfree (ctl_conf_ptr->epilog);
@@ -3040,7 +3038,6 @@ void init_slurm_conf(slurm_conf_t *ctl_conf_ptr)
 	ctl_conf_ptr->control_cnt = 0;
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
-	xfree (ctl_conf_ptr->core_spec_plugin);
 	xfree (ctl_conf_ptr->cred_type);
 	ctl_conf_ptr->def_mem_per_cpu           = 0;
 	ctl_conf_ptr->debug_flags		= 0;
@@ -3835,13 +3832,6 @@ static int _parse_select_type_param(
 			*param |= CR_CPU;
 			*param |= CR_MEMORY;
 			param_cnt++;
-		} else if (!xstrcasecmp(str_parameters, "other_cons_res")) {
-			error("other_cons_res is no longer a valid configuration. Please use other_cons_tres instead.");
-			rc = SLURM_ERROR;
-			xfree(st_str);
-			return rc;
-		} else if (!xstrcasecmp(str_parameters, "other_cons_tres")) {
-			*param |= CR_OTHER_CONS_TRES;
 		} else if (!xstrcasecmp(str_parameters,
 				       "CR_ONE_TASK_PER_CORE")) {
 			*param |= CR_ONE_TASK_PER_CORE;
@@ -3857,6 +3847,12 @@ static int _parse_select_type_param(
 		} else if (!xstrcasecmp(str_parameters,
 					"MULTIPLE_SHARING_GRES_PJ")) {
 			*param |= MULTIPLE_SHARING_GRES_PJ;
+		} else if (!xstrcasecmp(str_parameters,
+					"ENFORCE_BINDING_GRES")) {
+			*param |= ENFORCE_BINDING_GRES;
+		} else if (!xstrcasecmp(str_parameters,
+					"ONE_TASK_PER_SHARING_GRES")) {
+			*param |= ONE_TASK_PER_SHARING_GRES;
 		} else {
 			error("Bad SelectTypeParameter: %s", str_parameters);
 			rc = SLURM_ERROR;
@@ -3904,8 +3900,7 @@ static int _sort_plugins_by_name(void *x, void *y)
 /*
  * Sort the TaskPlugin= parameters in reverse alphabetical order.
  * This provides a convenient shortcut to following these rules:
- * a) task/cray_aries must be listed before task/cgroup
- * b) task/cgroup must be listed before task/affinity.
+ * a) task/cgroup must be listed before task/affinity.
  *    (This is due to a bug in kernels < 6.2 with cgroup/v2.)
  */
 static void _sort_task_plugin(char **task_plugin)
@@ -4067,13 +4062,6 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	} else {
 		slurm_conf.getnameinfo_cache_timeout =
 			DEFAULT_GETNAMEINFO_CACHE_TIMEOUT;
-	}
-
-	if (!s_p_get_string(&conf->core_spec_plugin, "CoreSpecPlugin",
-			    hashtbl)) {
-		/* empty */
-	} else if (xstrcasestr(conf->core_spec_plugin, "none")) {
-		xfree(conf->core_spec_plugin);
 	}
 
 	if (!s_p_get_string(&conf->cli_filter_plugins, "CliFilterPlugins",
@@ -4298,15 +4286,9 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 			conf->job_comp_port = DEFAULT_STORAGE_PORT;
 	}
 
-
-	if (!s_p_get_string(&conf->job_container_plugin, "JobContainerType",
-	    hashtbl)) {
-#ifdef HAVE_NATIVE_CRAY
-		conf->job_container_plugin = xstrdup("job_container/cncu");
-#else
-		/* empty */
-#endif
-	} else if (xstrcasestr(conf->job_container_plugin, "none"))
+	(void) s_p_get_string(&conf->job_container_plugin, "JobContainerType",
+			      hashtbl);
+	if (xstrcasestr(conf->job_container_plugin, "none"))
 		xfree(conf->job_container_plugin);
 
 	if (!s_p_get_uint16(&conf->job_file_append, "JobFileAppend", hashtbl))
@@ -4532,14 +4514,13 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 
 	if (!s_p_get_uint16(&conf->msg_timeout, "MessageTimeout", hashtbl))
 		conf->msg_timeout = DEFAULT_MSG_TIMEOUT;
-	else if ((conf->msg_timeout > 100) && running_in_daemon())
-		error("MessageTimeout is too high for effective fault-tolerance");
+	else if (conf->msg_timeout > 100)
+		error_in_daemon("MessageTimeout is too high for effective fault-tolerance");
 
 	if (!s_p_get_uint32(&conf->min_job_age, "MinJobAge", hashtbl))
 		conf->min_job_age = DEFAULT_MIN_JOB_AGE;
 	else if (conf->min_job_age < 2) {
-		if (running_in_slurmctld())
-			error("MinJobAge must be at least 2");
+		error_in_daemon("MinJobAge must be at least 2");
 		conf->min_job_age = 2;
 	}
 
@@ -4551,13 +4532,6 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	}
 
 	(void) s_p_get_string(&conf->mpi_params, "MpiParams", hashtbl);
-#if defined(HAVE_NATIVE_CRAY)
-	if (conf->mpi_params == NULL ||
-	    strstr(conf->mpi_params, "ports=") == NULL) {
-		error("MpiParams=ports= is required on Cray/Aries systems");
-		return SLURM_ERROR;
-	}
-#endif
 
 	if (s_p_get_boolean((bool *)&truth, "TrackWCKey", hashtbl) && truth)
 		conf->conf_flags |= CTL_CONF_WCKEY;
@@ -4920,26 +4894,9 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	if (tot_prio_weight > 0xffffffff)
 		error("PriorityWeight values too high, job priority value may overflow");
 
-	/* Out of order due to use with ProctrackType */
-	if (!s_p_get_string(&conf->switch_type, "SwitchType", hashtbl)) {
-#if defined HAVE_NATIVE_CRAY
-		conf->switch_type = xstrdup("switch/cray_aries");
-#else
-		/* empty */
-#endif
-	} else if (xstrcasestr(conf->switch_type, "none"))
-		xfree(conf->switch_type);
-
 	if (!s_p_get_string(&conf->proctrack_type, "ProctrackType", hashtbl)) {
 		conf->proctrack_type = xstrdup(DEFAULT_PROCTRACK_TYPE);
 	}
-#ifdef HAVE_NATIVE_CRAY
-	if (xstrcmp(conf->proctrack_type, "proctrack/cray_aries")) {
-		error("On a Cray/Aries ProctrackType=proctrack/cray_aries "
-		      "is required");
-		return SLURM_ERROR;
-	}
-#endif
 
 	conf->private_data = 0; /* Set to default before parsing PrivateData */
 	if (s_p_get_string(&temp_str, "PrivateData", hashtbl)) {
@@ -5141,17 +5098,6 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 			conf->slurm_user_id = my_uid;
 		}
 	}
-#ifdef HAVE_NATIVE_CRAY
-	/*
-	 * When running on Native Cray the SlurmUser must be root
-	 * to access the needed libraries.
-	 */
-	if (conf->slurm_user_id != 0) {
-		error("Cray/Aries requires SlurmUser=root (default), but have '%s'.",
-			conf->slurm_user_name);
-		return SLURM_ERROR;
-	}
-#endif
 
 	if (!s_p_get_string( &conf->slurmd_user_name, "SlurmdUser", hashtbl)) {
 		conf->slurmd_user_name = xstrdup("root");
@@ -5272,9 +5218,8 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 		conf->conf_flags |= CTL_CONF_NNSOCK;
 
 	if (xstrcasestr(conf->slurmd_params, "l3cache_as_socket") &&
-	    xstrcasestr(conf->slurmd_params, "numa_node_as_socket") &&
-	    running_in_daemon())
-		error("SlurmdParameters l3cache_as_socket and numa_node_as_socket are mutually exclusive. Ignoring numa_node_as_socket.");
+	    xstrcasestr(conf->slurmd_params, "numa_node_as_socket"))
+		error_in_daemon("SlurmdParameters l3cache_as_socket and numa_node_as_socket are mutually exclusive. Ignoring numa_node_as_socket.");
 
 	if (xstrcasestr(conf->slurmd_params, "allow_ecores"))
 		conf->conf_flags |= CTL_CONF_ECORE;
@@ -5362,7 +5307,9 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	(void) s_p_get_string(&conf->switch_param, "SwitchParameters",
 			      hashtbl);
 
-	/* see above for switch_type, order dependent */
+	(void) s_p_get_string(&conf->switch_type, "SwitchType", hashtbl);
+	if (xstrcasestr(conf->switch_type, "none"))
+		xfree(conf->switch_type);
 
 	if (!s_p_get_string(&conf->task_plugin, "TaskPlugin", hashtbl)) {
 		/* empty */
@@ -5446,11 +5393,6 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 					return SLURM_ERROR;
 				}
 			} else if (xstrcasecmp(tok, "SlurmdOffSpec") == 0) {
-				if (xstrcasestr(conf->task_plugin,
-						"cray_aries")) {
-					error("TaskPluginParam=SlurmdOffSpec invalid with TaskPlugin=task/cray_aries");
-					return SLURM_ERROR;
-				}
 				conf->task_plugin_param |= SLURMD_OFF_SPEC;
 			} else {
 				error("Bad TaskPluginParam: %s", tok);
@@ -5511,6 +5453,10 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 
 	if (!conf->topology_plugin)
 		conf->topology_plugin = xstrdup("topology/default");
+
+	if (!xstrcasecmp(conf->select_type, "select/linear") &&
+	    !xstrcasecmp(conf->topology_plugin, "topology/tree"))
+		fatal("select/linear with topology/tree is not supported. Please switch to select/cons_tres or stop using topology/tree.");
 
 	if (((conf->tree_width = (getenv("SLURM_TREE_WIDTH") ?
 				  atoi(getenv("SLURM_TREE_WIDTH")) : 0)) > 0) ||
@@ -5959,11 +5905,6 @@ extern char * debug_flags2str(uint64_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "Switch");
 	}
-	if (debug_flags & DEBUG_FLAG_TIME_CRAY) {
-		if (rc)
-			xstrcat(rc, ",");
-		xstrcat(rc, "TimeCray");
-	}
 	if (debug_flags & DEBUG_FLAG_TRACE_JOBS) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -6120,8 +6061,6 @@ extern int debug_str2flags(const char *debug_flags, uint64_t *flags_out)
 		else if ((xstrcasecmp(tok, "Power") == 0) ||
 			 (xstrcasecmp(tok, "PowerSave") == 0))
 			(*flags_out) |= DEBUG_FLAG_POWER;
-		else if (xstrcasecmp(tok, "TimeCray") == 0)
-			(*flags_out) |= DEBUG_FLAG_TIME_CRAY;
 		else if (xstrcasecmp(tok, "WorkQueue") == 0 ||
 			 xstrcasecmp(tok, "WorkQ") == 0)
 			(*flags_out) |= DEBUG_FLAG_WORKQ;

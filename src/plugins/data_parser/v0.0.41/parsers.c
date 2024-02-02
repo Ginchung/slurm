@@ -1066,65 +1066,129 @@ static int DUMP_FUNC(QOS_PREEMPT_LIST)(const parser_t *const parser, void *obj,
 	return SLURM_SUCCESS;
 }
 
+static int _find_assoc(const parser_t *const parser, slurmdb_assoc_rec_t *dst,
+		       data_t *src, slurmdb_assoc_rec_t *key, args_t *args,
+		       data_t *parent_path)
+{
+	slurmdb_assoc_rec_t *match;
+
+	if (!key->cluster)
+		key->cluster = slurm_conf.cluster_name;
+
+	match = list_find_first(args->assoc_list, (ListFindF) compare_assoc,
+				key);
+
+	if (key->cluster == slurm_conf.cluster_name)
+		key->cluster = NULL;
+
+	if (!match)
+		return parse_error(parser, args, parent_path,
+				 ESLURM_INVALID_ASSOC,
+				 "Unable to find association: %pd", src);
+
+	xassert(!dst->id || (dst->id == NO_VAL) || (dst->id == match->id));
+
+	if (!(dst->id = match->id))
+		return ESLURM_INVALID_ASSOC;
+
+	return SLURM_SUCCESS;
+}
+
 static int PARSE_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 				data_t *src, args_t *args, data_t *parent_path)
 {
-	int rc = SLURM_ERROR;
-	slurmdb_assoc_rec_t assoc;
-	uint32_t id = 0, *id_ptr = obj;
+	slurmdb_assoc_rec_t *assoc = obj;
 
-	slurmdb_init_assoc_rec(&assoc, false);
-	(void) data_convert_type(src, DATA_TYPE_NONE);
+	switch (data_get_type(src)) {
+	case DATA_TYPE_STRING:
+	{
+		char *str = data_get_string(src);
 
-	if (data_get_type(src) == DATA_TYPE_INT_64) {
-		if ((rc = PARSE(UINT32, id, src, parent_path, args)) || !id)
-			goto cleanup;
+		/* treat "" same as null */
+		if (!str || !str[0])
+			return SLURM_SUCCESS;
 
-		assoc.id = id;
-	} else if (data_get_type(src) == DATA_TYPE_NULL) {
-		rc = SLURM_SUCCESS;
-	} else {
-		slurmdb_assoc_rec_t *match;
+		/* fall through for non-empty strings */
+	}
+	case DATA_TYPE_FLOAT:
+		if (data_convert_type(src, DATA_TYPE_INT_64) !=
+		    DATA_TYPE_INT_64)
+			return parse_error(parser, args, parent_path,
+					   ESLURM_DATA_CONV_FAILED,
+					   "Unable to convert %pd to integer for association id",
+					   src);
+		/* fall through */
+	case DATA_TYPE_INT_64:
+	{
+		int rc;
+		slurmdb_assoc_rec_t key = {
+			.id = assoc->id,
+			.cluster = assoc->cluster,
+		};
 
-		if ((rc = PARSE(ASSOC_SHORT, assoc, src, parent_path, args)))
-			goto cleanup;
+		if ((rc = PARSE(UINT32, key.id, src, parent_path, args)))
+			return rc;
 
-		if ((match = list_find_first(args->assoc_list,
-					     (ListFindF) compare_assoc,
-					     &assoc))) {
-			id = match->id;
-		} else {
-			rc = ESLURM_INVALID_ASSOC;
-		}
+		/* treat 0 same as null */
+		if (!key.id)
+			return SLURM_SUCCESS;
+
+		return _find_assoc(parser, assoc, src, &key, args, parent_path);
+	}
+	case DATA_TYPE_NULL:
+		return SLURM_SUCCESS;
+	case DATA_TYPE_DICT:
+	{
+		int rc;
+		slurmdb_assoc_rec_t key;
+
+		if (!data_get_dict_length(src))
+			return SLURM_SUCCESS;
+
+		slurmdb_init_assoc_rec(&key, false);
+
+		if (!(rc = PARSE(ASSOC_SHORT, key, src, parent_path, args)))
+			rc = _find_assoc(parser, assoc, src, &key, args,
+					 parent_path);
+
+		slurmdb_free_assoc_rec_members(&key);
+		return rc;
+	}
+	case DATA_TYPE_LIST:
+	case DATA_TYPE_BOOL:
+		return parse_error(parser, args, parent_path,
+				   ESLURM_INVALID_ASSOC,
+				   "Expected numeric Association ID but got %pd",
+				   src);
+	case DATA_TYPE_NONE:
+		/* fall through */
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type");
 	}
 
-cleanup:
-	slurmdb_free_assoc_rec_members(&assoc);
-	*id_ptr = id;
-	return rc;
+	fatal_abort("should never run");
 }
 
 static int DUMP_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 			       data_t *dst, args_t *args)
 {
-	uint32_t *id_ptr = obj;
-	slurmdb_assoc_rec_t key = {
-		.id = *id_ptr,
-	};
+	slurmdb_assoc_rec_t *assoc = obj;
+	uint32_t id = 0;
 
-	if (key.id && (key.id < NO_VAL)) {
+	if (assoc->id && (assoc->id < NO_VAL)) {
 		slurmdb_assoc_rec_t *match;
 
 		if ((match = list_find_first(args->assoc_list,
-					     (ListFindF) compare_assoc, &key)))
-			return DUMP(ASSOC_SHORT_PTR, match, dst, args);
+					     (ListFindF) compare_assoc, assoc)))
+			id = match->id;
 	}
 
 	if (is_complex_mode(args)) {
+		data_set_null(dst);
 		return SLURM_SUCCESS;
 	}
 
-	return DUMP(ASSOC_SHORT, key, dst, args);
+	return DUMP(UINT32, id, dst, args);
 }
 
 static int PARSE_FUNC(JOB_ASSOC_ID)(const parser_t *const parser, void *obj,
@@ -1688,14 +1752,25 @@ static int PARSE_FUNC(USER_ID)(const parser_t *const parser, void *obj,
 	(void) data_convert_type(src, DATA_TYPE_NONE);
 
 	switch (data_get_type(src)) {
+	case DATA_TYPE_FLOAT:
+		if (data_convert_type(src, DATA_TYPE_INT_64) !=
+		    DATA_TYPE_INT_64)
+			return parse_error(parser, args, parent_path,
+					   ESLURM_DATA_CONV_FAILED, "Unable to convert %pd to integer to resolve user",
+					   src);
+		/* fall through */
 	case DATA_TYPE_INT_64:
-	{
 		uid = data_get_int(src);
 		break;
-	}
 	case DATA_TYPE_STRING:
 	{
 		int rc;
+		char *str = data_get_string(src);
+
+		if (!str || !str[0]) {
+			*uid_ptr = SLURM_AUTH_NOBODY;
+			return SLURM_SUCCESS;
+		}
 
 		if ((rc = uid_from_string(data_get_string(src), &uid)))
 		{
@@ -1710,11 +1785,18 @@ static int PARSE_FUNC(USER_ID)(const parser_t *const parser, void *obj,
 
 		break;
 	}
-	default:
+	case DATA_TYPE_NULL:
+		*uid_ptr = SLURM_AUTH_NOBODY;
+		return SLURM_SUCCESS;
+	case DATA_TYPE_DICT:
+	case DATA_TYPE_LIST:
+	case DATA_TYPE_BOOL:
 		return parse_error(parser, args, parent_path,
 				   ESLURM_DATA_CONV_FAILED,
-				   "Invalid user field value type: %s",
-				   data_get_type_string(src));
+				   "Invalid user field: %pd", src);
+	case DATA_TYPE_NONE:
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type");
 	}
 
 	if (uid >= INT_MAX)
@@ -1734,14 +1816,25 @@ static int PARSE_FUNC(GROUP_ID)(const parser_t *const parser, void *obj,
 	gid_t gid;
 
 	switch (data_convert_type(src, DATA_TYPE_NONE)) {
+	case DATA_TYPE_FLOAT:
+		if (data_convert_type(src, DATA_TYPE_INT_64) !=
+		    DATA_TYPE_INT_64)
+			return parse_error(parser, args, parent_path,
+					   ESLURM_DATA_CONV_FAILED, "Unable to convert %pd to integer to resolve group",
+					   src);
+		/* fall through */
 	case DATA_TYPE_INT_64:
-	{
 		gid = data_get_int(src);
 		break;
-	}
 	case DATA_TYPE_STRING:
 	{
 		int rc;
+		char *str = data_get_string(src);
+
+		if (!str || !str[0]) {
+			*gid_ptr = SLURM_AUTH_NOBODY;
+			return SLURM_SUCCESS;
+		}
 
 		if ((rc = gid_from_string(data_get_string(src), &gid)))
 		{
@@ -1756,11 +1849,18 @@ static int PARSE_FUNC(GROUP_ID)(const parser_t *const parser, void *obj,
 
 		break;
 	}
-	default:
+	case DATA_TYPE_NULL:
+		*gid_ptr = SLURM_AUTH_NOBODY;
+		return SLURM_SUCCESS;
+	case DATA_TYPE_DICT:
+	case DATA_TYPE_LIST:
+	case DATA_TYPE_BOOL:
 		return parse_error(parser, args, parent_path,
 				   ESLURM_DATA_CONV_FAILED,
-				   "Invalid group field value type: %s",
-				   data_get_type_string(src));
+				   "Invalid group field: %pd", src);
+	case DATA_TYPE_NONE:
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type");
 	}
 
 	if (gid >= INT_MAX)
@@ -2025,11 +2125,12 @@ static int PARSE_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 				   "Expected floating point number but got %pd",
 				   src);
 	case DATA_TYPE_NONE:
-	case DATA_TYPE_MAX:
 		/* fall through */
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type");
 	}
 
-	fatal_abort("invalid type");
+	fatal_abort("should never run");
 }
 
 static int DUMP_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
@@ -2152,11 +2253,12 @@ static int PARSE_FUNC(INT64_NO_VAL)(const parser_t *const parser, void *obj,
 				   ESLURM_DATA_CONV_FAILED,
 				   "Expected integer but got %pd", src);
 	case DATA_TYPE_NONE:
-	case DATA_TYPE_MAX:
 		/* fall through */
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type");
 	}
 
-	fatal_abort("invalid type");
+	fatal_abort("should never run");
 }
 
 static int DUMP_FUNC(INT64_NO_VAL)(const parser_t *const parser, void *obj,
@@ -2352,16 +2454,18 @@ static int PARSE_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
 	case DATA_TYPE_INT_64:
 		return PARSE(UINT64, *dst, src, parent_path, args);
 	case DATA_TYPE_LIST:
+		/* fall through */
 	case DATA_TYPE_BOOL:
 		return parse_error(parser, args, parent_path,
 				   ESLURM_DATA_CONV_FAILED,
 				   "Expected integer but got %pd", src);
 	case DATA_TYPE_NONE:
-	case DATA_TYPE_MAX:
 		/* fall through */
+	case DATA_TYPE_MAX:
+		fatal_abort("invalid type: %d", data_get_type(src));
 	}
 
-	fatal_abort("invalid type");
+	fatal_abort("should never run");
 }
 
 static int DUMP_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
@@ -3880,6 +3984,42 @@ static int DUMP_FUNC(STEP_INFO_MSG)(const parser_t *const parser, void *obj,
 			  args);
 
 	return rc;
+}
+
+static int PARSE_FUNC(HOLD)(const parser_t *const parser, void *obj,
+			    data_t *src, args_t *args, data_t *parent_path)
+{
+	uint32_t *priority = obj;
+
+	xassert(args->magic == MAGIC_ARGS);
+
+	if (data_get_type(src) == DATA_TYPE_NULL) {
+		/* ignore null as implied false */
+		return SLURM_SUCCESS;
+	}
+
+	if (data_convert_type(src, DATA_TYPE_BOOL) != DATA_TYPE_BOOL)
+		return ESLURM_DATA_CONV_FAILED;
+
+	if (data_get_bool(src))
+		*priority = 0;
+	else
+		*priority = INFINITE;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(HOLD)(const parser_t *const parser, void *obj, data_t *dst,
+			   args_t *args)
+{
+	uint32_t *priority = obj;
+
+	if (*priority == 0)
+		data_set_bool(dst, true);
+	else
+		data_set_bool(dst, false);
+
+	return SLURM_SUCCESS;
 }
 
 static data_for_each_cmd_t _foreach_hostlist_parse(data_t *data, void *arg)
@@ -5927,7 +6067,7 @@ static const parser_t PARSER_ARRAY(ASSOC)[] = {
 	add_skip(grp_tres_run_mins_ctld),
 	add_parse(TRES_STR, max_tres_run_mins, "max/tres/minutes/total", NULL),
 	add_parse(UINT32_NO_VAL, grp_wall, "max/per/account/wall_clock", NULL),
-	add_parse(ASSOC_ID, id, "id", NULL),
+	add_complex_parser(slurmdb_assoc_rec_t, ASSOC_ID, false, "id", NULL),
 	add_parse(BOOL16, is_def, "is_default", NULL),
 	add_skip(leaf_usage),
 	add_skip(lft),
@@ -6093,7 +6233,8 @@ static const parser_t PARSER_ARRAY(JOB)[] = {
 	add_parse(STRING, mcs_label, "mcs/label", NULL),
 	add_parse(STRING, nodes, "nodes", NULL),
 	add_parse(STRING, partition, "partition", NULL),
-	add_parse(UINT32_NO_VAL, priority, "priority", NULL),
+	add_parse_overload(HOLD, priority, 1, "hold", "Hold (true) or release (false) job"),
+	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(QOS_ID, qosid, "qos", NULL),
 	add_parse(UINT32, req_cpus, "required/CPUs", NULL),
 	add_parse_overload(MEM_PER_CPUS, req_mem, 1, "required/memory_per_cpu", NULL),
@@ -6931,7 +7072,8 @@ static const parser_t PARSER_ARRAY(JOB_INFO)[] = {
 	add_parse(TIMESTAMP_NO_VAL, preempt_time, "preempt_time", NULL),
 	add_parse(TIMESTAMP_NO_VAL, preemptable_time, "preemptable_time", NULL),
 	add_parse(TIMESTAMP_NO_VAL, pre_sus_time, "pre_sus_time", NULL),
-	add_parse(UINT32_NO_VAL, priority, "priority", NULL),
+	add_parse_overload(HOLD, priority, 1, "hold", "Hold (true) or release (false) job"),
+	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(ACCT_GATHER_PROFILE, profile, "profile", NULL),
 	add_parse(QOS_NAME, qos, "qos", NULL),
 	add_parse(BOOL, reboot, "reboot", NULL),
@@ -7525,7 +7667,8 @@ static const parser_t PARSER_ARRAY(JOB_DESC_MSG)[] = {
 	add_parse(UINT16, plane_size, "distribution_plane_size", NULL),
 	add_flags(POWER_FLAGS, power_flags, "power_flags", NULL),
 	add_parse(STRING, prefer, "prefer", NULL),
-	add_parse(UINT32_NO_VAL, priority, "priority", NULL),
+	add_parse_overload(HOLD, priority, 1, "hold", "Hold (true) or release (false) job"),
+	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(ACCT_GATHER_PROFILE, profile, "profile", NULL),
 	add_parse(STRING, qos, "qos", NULL),
 	add_parse(BOOL16, reboot, "reboot", NULL),
@@ -8264,7 +8407,6 @@ static const flag_bit_t PARSER_FLAG_ARRAY(CR_TYPE)[] = {
 	add_flag_bit(CR_MEMORY, "MEMORY"),
 	add_flag_bit(CR_ONE_TASK_PER_CORE, "ONE_TASK_PER_CORE"),
 	add_flag_bit(CR_PACK_NODES, "PACK_NODES"),
-	add_flag_bit(CR_OTHER_CONS_TRES, "OTHER_CONS_TRES"),
 	add_flag_bit(CR_CORE_DEFAULT_DIST_BLOCK, "CORE_DEFAULT_DIST_BLOCK"),
 	add_flag_bit(CR_LLN, "LLN"),
 	add_flag_bit(CR_LINEAR, "LINEAR"),
@@ -8871,6 +9013,7 @@ static const parser_t parsers[] = {
 	addps(BITSTR, bitstr_t, NEED_NONE, STRING, NULL, NULL, NULL),
 	addpsp(JOB_ARRAY_RESPONSE_MSG, JOB_ARRAY_RESPONSE_ARRAY, job_array_resp_msg_t, NEED_NONE, "Job update results"),
 	addpsp(JOB_EXCLUSIVE, JOB_EXCLUSIVE_FLAGS, uint16_t, NEED_NONE, NULL),
+	addps(HOLD, uint32_t, NEED_NONE, BOOL, NULL, NULL, "Job held"),
 	addpsp(TIMESTAMP, UINT64, time_t, NEED_NONE, NULL),
 	addpsp(TIMESTAMP_NO_VAL, UINT64_NO_VAL, time_t, NEED_NONE, NULL),
 	addps(SELECTED_STEP, slurm_selected_step_t, NEED_NONE, STRING, NULL, NULL, NULL),
@@ -8884,10 +9027,10 @@ static const parser_t parsers[] = {
 	addpsp(ASSOC_ID_STRING_CSV_LIST, STRING_LIST, list_t *, NEED_NONE, NULL),
 	addpsp(PROCESS_EXIT_CODE, PROCESS_EXIT_CODE_VERBOSE, uint32_t, NEED_NONE, "return code returned by process"),
 	addpsp(SLURM_STEP_ID_STRING, SELECTED_STEP, slurm_step_id_t, NEED_NONE, "Slurm Job StepId"),
-	addpsp(ASSOC_ID, ASSOC_SHORT, uint32_t, NEED_ASSOC, "Association ID"),
 	addps(RPC_ID, uint16_t, NEED_NONE, STRING, NULL, NULL, "Slurm RPC message type"),
 
 	/* Complex type parsers */
+	addpcp(ASSOC_ID, UINT32, slurmdb_assoc_rec_t, NEED_ASSOC, "Association ID"),
 	addpcp(JOB_ASSOC_ID, ASSOC_SHORT_PTR, slurmdb_job_rec_t, NEED_ASSOC, NULL),
 	addpca(QOS_PREEMPT_LIST, STRING, slurmdb_qos_rec_t, NEED_QOS, NULL),
 	addpcp(STEP_NODES, HOSTLIST, slurmdb_step_rec_t, NEED_TRES, NULL),
@@ -9170,7 +9313,7 @@ static const parser_t parsers[] = {
 	addpl(OPENAPI_ERRORS, OPENAPI_ERROR_PTR, NEED_NONE),
 	addpl(OPENAPI_WARNINGS, OPENAPI_WARNING_PTR, NEED_NONE),
 	addpl(STRING_LIST, STRING, NEED_NONE),
-	addpl(SELECTED_STEP_LIST, SELECTED_STEP, NEED_NONE),
+	addpl(SELECTED_STEP_LIST, SELECTED_STEP_PTR, NEED_NONE),
 	addpl(GROUP_ID_STRING_LIST, GROUP_ID_STRING, NEED_NONE),
 	addpl(USER_ID_STRING_LIST, USER_ID_STRING, NEED_NONE),
 	addpl(JOB_STATE_ID_STRING_LIST, JOB_STATE_ID_STRING, NEED_NONE),

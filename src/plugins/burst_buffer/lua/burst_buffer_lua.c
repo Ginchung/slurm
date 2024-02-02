@@ -974,8 +974,7 @@ static int _run_lua_script(run_lua_args_t *args)
 					     args->argc,
 					     args->argv,
 					     args->timeout,
-					     info_buf->head,
-					     info_buf->processed,
+					     info_buf,
 					     args->resp_msg,
 					     args->track_script_signal);
 	} else {
@@ -987,10 +986,22 @@ static int _run_lua_script(run_lua_args_t *args)
 			slurm_msg_t_init(info_msg);
 			info_msg->protocol_version = SLURM_PROTOCOL_VERSION;
 			info_msg->msg_type = RESPONSE_JOB_INFO;
+			/*
+			 * Since we are directly unpacking the buffer that we
+			 * just packed, we need to reset the "processed" value
+			 * of the buffer because unpacking starts from there.
+			 */
+			set_buf_offset(info_buf, 0);
 			unpack_msg(info_msg, info_buf);
 			job_info = info_msg->data;
 			info_msg->data = NULL;
 			slurm_free_msg(info_msg);
+			/*
+			 * If info_buf is non-NULL then we should always have
+			 * gotten a job. This assert catches if something
+			 * went wrong with the pack or unpack.
+			 */
+			xassert(job_info->record_count);
 		}
 		rc = _start_lua_script(args->lua_func, args->job_id, args->argc,
 				       args->argv, job_info, args->resp_msg);

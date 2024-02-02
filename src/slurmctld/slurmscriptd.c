@@ -218,7 +218,7 @@ static void _wait_for_script_resp(script_response_t *script_resp,
 
 static void _wait_for_powersave_scripts()
 {
-	int cnt;
+	int cnt = 0;
 	struct timespec ts = {0, 0};
 	time_t start;
 	time_t now;
@@ -1247,8 +1247,8 @@ extern void slurmscriptd_run_power(char *script_path, char *hosts,
 
 extern int slurmscriptd_run_bb_lua(uint32_t job_id, char *function,
 				   uint32_t argc, char **argv, uint32_t timeout,
-				   char *job_buf, int job_buf_size,
-				   char **resp, bool *track_script_signalled)
+				   buf_t *job_buf, char **resp,
+				   bool *track_script_signalled)
 {
 	int status, rc;
 	run_script_msg_t run_script_msg;
@@ -1259,8 +1259,8 @@ extern int slurmscriptd_run_bb_lua(uint32_t job_id, char *function,
 	run_script_msg.argc = argc;
 	run_script_msg.argv = argv;
 	run_script_msg.env = NULL;
-	run_script_msg.extra_buf = job_buf;
-	run_script_msg.extra_buf_size = job_buf_size;
+	run_script_msg.extra_buf = job_buf ? job_buf->head : NULL;
+	run_script_msg.extra_buf_size = job_buf ? job_buf->processed : 0;
 	run_script_msg.job_id = job_id;
 	run_script_msg.script_name = function; /* Shallow copy, do not free */
 	run_script_msg.script_path = NULL;
@@ -1343,8 +1343,6 @@ extern void slurmscriptd_run_resv(char *script_path, uint32_t argc, char **argv,
 {
 	run_script_msg_t *run_script_msg;
 	slurmscriptd_msg_t *send_args = xmalloc(sizeof(*send_args));
-
-	memset(&run_script_msg, 0, sizeof(run_script_msg));
 
 	/* Init run_script_msg */
 	run_script_msg = _init_run_script_msg(NULL, script_name, script_path,

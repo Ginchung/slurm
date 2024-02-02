@@ -90,8 +90,7 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 target_triplet = @target@
-@WITH_SWITCH_CRAY_ARIES_TRUE@am__append_1 = cray_aries
-@WITH_SWITCH_HPE_SLINGSHOT_TRUE@am__append_2 = hpe_slingshot
+@WITH_SWITCH_HPE_SLINGSHOT_TRUE@am__append_1 = hpe_slingshot
 subdir = src/plugins/switch
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
@@ -110,7 +109,6 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_compile_flag.m4 \
 	$(top_srcdir)/auxdir/x_ac_affinity.m4 \
 	$(top_srcdir)/auxdir/x_ac_c99.m4 \
 	$(top_srcdir)/auxdir/x_ac_cgroup.m4 \
-	$(top_srcdir)/auxdir/x_ac_cray.m4 \
 	$(top_srcdir)/auxdir/x_ac_curl.m4 \
 	$(top_srcdir)/auxdir/x_ac_databases.m4 \
 	$(top_srcdir)/auxdir/x_ac_debug.m4 \
@@ -203,7 +201,7 @@ am__define_uniq_tagged_files = \
   unique=`for i in $$list; do \
     if test -f "$$i"; then echo $$i; else echo $(srcdir)/$$i; fi; \
   done | $(am__uniquify_input)`
-DIST_SUBDIRS = cray_aries hpe_slingshot
+DIST_SUBDIRS = hpe_slingshot
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
@@ -221,14 +219,6 @@ CHECK_CFLAGS = @CHECK_CFLAGS@
 CHECK_LIBS = @CHECK_LIBS@
 CPP = @CPP@
 CPPFLAGS = @CPPFLAGS@
-CRAY_JOB_CPPFLAGS = @CRAY_JOB_CPPFLAGS@
-CRAY_JOB_LDFLAGS = @CRAY_JOB_LDFLAGS@
-CRAY_SELECT_CPPFLAGS = @CRAY_SELECT_CPPFLAGS@
-CRAY_SELECT_LDFLAGS = @CRAY_SELECT_LDFLAGS@
-CRAY_SWITCH_CPPFLAGS = @CRAY_SWITCH_CPPFLAGS@
-CRAY_SWITCH_LDFLAGS = @CRAY_SWITCH_LDFLAGS@
-CRAY_TASK_CPPFLAGS = @CRAY_TASK_CPPFLAGS@
-CRAY_TASK_LDFLAGS = @CRAY_TASK_LDFLAGS@
 CSCOPE = @CSCOPE@
 CTAGS = @CTAGS@
 CXX = @CXX@
@@ -236,8 +226,6 @@ CXXCPP = @CXXCPP@
 CXXDEPMODE = @CXXDEPMODE@
 CXXFLAGS = @CXXFLAGS@
 CYGPATH_W = @CYGPATH_W@
-DATAWARP_CPPFLAGS = @DATAWARP_CPPFLAGS@
-DATAWARP_LDFLAGS = @DATAWARP_LDFLAGS@
 DEFS = @DEFS@
 DEPDIR = @DEPDIR@
 DLLTOOL = @DLLTOOL@
@@ -466,7 +454,7 @@ target_vendor = @target_vendor@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-SUBDIRS = $(am__append_1) $(am__append_2)
+SUBDIRS = $(am__append_1)
 all: all-recursive
 
 .SUFFIXES:

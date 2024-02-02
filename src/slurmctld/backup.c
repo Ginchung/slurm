@@ -40,6 +40,7 @@
 #include "config.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -133,9 +134,9 @@ void run_backup(void)
 	slurmctld_config.resume_backup = false;
 
 	/* It is now ok to tell the primary I am done (if I ever had control) */
-	slurm_mutex_lock(&slurmctld_config.thread_count_lock);
+	slurm_mutex_lock(&slurmctld_config.backup_finish_lock);
 	slurm_cond_broadcast(&slurmctld_config.backup_finish_cond);
-	slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
+	slurm_mutex_unlock(&slurmctld_config.backup_finish_lock);
 
 	if (xsignal_block(backup_sigarray) < 0)
 		error("Unable to block signals");
@@ -184,8 +185,12 @@ void run_backup(void)
 			 */
 			break;
 		} else {
+			char *abort_msg = NULL;
+			bool abort_takeover = false;
+			static time_t prev_heartbeat = 0;
 			time_t use_time, last_heartbeat;
 			int server_inx = -1;
+
 			last_heartbeat = get_last_heartbeat(&server_inx);
 			debug("%s: last_heartbeat %ld from server %d",
 			      __func__, last_heartbeat, server_inx);
@@ -204,11 +209,41 @@ void run_backup(void)
 				use_time = last_heartbeat;
 			}
 
+			if (!last_heartbeat) {
+				/*
+				 * Failed to read the heartbeat file, abort
+				 * takeover because the StateSaveLocation is
+				 * broken.
+				 */
+				abort_takeover = 1;
+				abort_msg = "Not taking control. Primary slurmctld is unresponsive, but heartbeat file could not be read. Something is wrong with your StateSaveLocation.";
+			} else if (!prev_heartbeat) {
+				/*
+				 * Need at least one loop to detect if the
+				 * primary is still running.
+				 */
+				abort_takeover = 1;
+				abort_msg = "Not taking control. Primary slurmctld is unresponsive, but not yet able to determine if primary may actually be running.";
+			} else if (last_heartbeat != prev_heartbeat) {
+				/*
+				 * If the primary is unresponsive but the
+				 * heartbeat is getting updated, consider the
+				 * controller still "working" and abort the
+				 * takeover.
+				 */
+				abort_takeover = 1;
+				abort_msg = "Not taking control. Primary slurmctld is unresponsive, but is still updating the heartbeat file. Check for clock skew.";
+			}
+
+			prev_heartbeat = last_heartbeat;
+
 			if (((time(NULL) - use_time) >
 			    slurm_conf.slurmctld_timeout)) {
-				if (last_heartbeat)
+				if (!abort_takeover) {
+					prev_heartbeat = 0;
 					break;
-				error("Not taking control. Heartbeat file could not be read and the primary slurmctld is unresponsive. Something is wrong with your StateSaveLocation.");
+				}
+				error("%s", abort_msg);
 			}
 		}
 	}
@@ -269,10 +304,16 @@ void run_backup(void)
 		error("Unable to recover slurm state");
 		abort();
 	}
+	configless_update();
+	if (conf_includes_list) {
+		/*
+		 * clear included files so that subsequent conf
+		 * parsings refill it with updated information.
+		 */
+		list_flush(conf_includes_list);
+	}
 	unlock_slurmctld(config_write_lock);
 	select_g_select_nodeinfo_set_all();
-
-	return;
 }
 
 /*
@@ -339,24 +380,14 @@ static void _sig_handler(int signal)
  */
 static void *_background_rpc_mgr(void *no_data)
 {
-	int newsockfd, sockfd;
+	int newsockfd;
+	int fd_next = 0, i;
 	slurm_addr_t cli_addr;
 	slurm_msg_t msg;
 
-	/* Read configuration only */
-	slurmctld_lock_t config_read_lock = {
-		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	int sigarray[] = {SIGUSR1, 0};
 
 	debug3("_background_rpc_mgr pid = %lu", (unsigned long) getpid());
-
-	/* initialize port for RPCs */
-	lock_slurmctld(config_read_lock);
-
-	if ((sockfd = slurm_init_msg_engine_port(slurm_conf.slurmctld_port))
-	    == SLURM_ERROR)
-		fatal("slurm_init_msg_engine_port error %m");
-	unlock_slurmctld(config_read_lock);
 
 	/*
 	 * Prepare to catch SIGUSR1 to interrupt accept().  This signal is
@@ -371,11 +402,23 @@ static void *_background_rpc_mgr(void *no_data)
 	 * Process incoming RPCs indefinitely
 	 */
 	while (slurmctld_config.shutdown_time == 0) {
-		/*
-		 * accept needed for stream implementation is a no-op in
-		 * message implementation that just passes sockfd to newsockfd
-		 */
-		if ((newsockfd = slurm_accept_msg_conn(sockfd, &cli_addr))
+		if (poll(listen_fds, listen_nports, -1) == -1) {
+			if (errno != EINTR)
+				error("slurm_accept_msg_conn poll: %m");
+			continue;
+		}
+
+		/* find one to process */
+		for (i = 0; i < listen_nports; i++) {
+			if (listen_fds[(fd_next + i) % listen_nports].revents) {
+				i = (fd_next + i) % listen_nports;
+				break;
+			}
+		}
+		fd_next = (i + 1) % listen_nports;
+
+		if ((newsockfd = slurm_accept_msg_conn(listen_fds[i].fd,
+						       &cli_addr))
 		    == SLURM_ERROR) {
 			if (errno != EINTR)
 				error("slurm_accept_msg_conn: %m");
@@ -397,7 +440,6 @@ static void *_background_rpc_mgr(void *no_data)
 	}
 
 	debug3("_background_rpc_mgr shutting down");
-	close(sockfd);	/* close the main socket */
 	return NULL;
 }
 
@@ -612,7 +654,6 @@ static void _backup_reconfig(void)
 	slurm_conf_reinit(NULL);
 	update_logging();
 	slurm_conf.last_update = time(NULL);
-	return;
 }
 
 static void *_shutdown_controller(void *arg)

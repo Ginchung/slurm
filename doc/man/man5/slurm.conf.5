@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "December 2023" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "January 2024" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -285,6 +285,12 @@ Configurable values at present are:
 .IP
 .RS
 .TP 20
+\fBacct_gather_energy/gpu\fR
+Energy consumption data is collected from the GPU management library (e.g. rsmi)
+for the corresponding type of GPU. Only available for rsmi at present.
+.IP
+
+.TP
 \fBacct_gather_energy/ipmi\fR
 Energy consumption data is collected from the Baseboard Management Controller
 (BMC) using the Intelligent Platform Management Interface (IPMI).
@@ -502,11 +508,20 @@ The default value is dependent upon the MUNGE installation, but is typically
 \fBAuthType\fR
 The authentication method for communications between Slurm
 components.
-Acceptable values at present include "auth/munge", which is the default.
-"auth/munge" indicates that MUNGE is to be used.
-(See "https://dun.github.io/munge/" for more information).
 All Slurm daemons and commands must be terminated prior to changing
 the value of \fBAuthType\fR and later restarted.
+Acceptable values at present:
+.RS
+.TP
+\fBauth/munge\fR
+Indicates that MUNGE is to be used (default).
+(See "https://dun.github.io/munge/" for more information).
+.IP
+
+.TP
+\fBauth/slurm\fR
+Use Slurm's internal authentication plugin.
+.RE
 .IP
 
 .TP
@@ -666,11 +681,6 @@ Require all Slurm authentication tokens to include a newer (20.11.9 and
 credential replay attacks.  This option should only be enabled once all Slurm
 daemons have been upgraded to 20.11.9/21.08.8 or newer, and all jobs that were
 started before the upgrade have been completed.
-.TP
-\fBCheckGhalQuiesce\fR
-Used specifically on a Cray using an Aries Ghal interconnect.  This will check
-to see if the system is quiescing when sending a message, and if so, we wait
-until it is done before sending.
 .IP
 
 .TP
@@ -761,20 +771,6 @@ Deprecated option, see \fBSlurmctldHost\fR.
 .IP
 
 .TP
-\fBCoreSpecPlugin\fR
-Identifies the plugins to be used for enforcement of core specialization.
-A restart of the slurmd daemons is required for changes to this parameter
-to take effect.
-Acceptable values at present include:
-.IP
-.RS
-.TP 20
-\fBcore_spec/cray_aries\fR
-used only for Cray systems
-.RE
-.IP
-
-.TP
 \fBCpuFreqDef\fR
 Default CPU governor to use when running a job step if it has not been
 explicitly set with the \-\-cpu\-freq option. Acceptable values at present
@@ -850,15 +846,26 @@ Default: OnDemand, Performance and UserSpace.
 The cryptographic signature tool to be used in the creation of
 job step credentials.
 A restart of slurmctld is required for changes to this parameter to take effect.
-The default (and recommended) value is "cred/munge".
+Acceptable values at present are:
+.RS
+.TP
+\fBcred/munge\fR
+Indicates that Munge is to be used (default).
+.IP
+
+.TP
+\fBcred/slurm\fR
+Use Slurm's internal credential format.
+.RE
 .IP
 
 .TP
 \fBDebugFlags\fR
 Defines specific subsystems which should provide more detailed event logging.
 Multiple subsystems can be specified with comma separators.
-Most DebugFlags will result in verbose\-level logging for the identified
-subsystems, and could impact performance.
+Most DebugFlags will result in additional logging messages for the identified
+subsystems if \fBSlurmctldDebug\fR is at 'verbose' or higher.
+More logging may impact performance.
 
 \fBNOTE\fR: You can also set debug flags by having the \fBSLURM_DEBUG_FLAGS\fR
 environment variable defined with the desired flags when the process (client
@@ -1055,11 +1062,6 @@ Switch plugin
 .IP
 
 .TP
-\fBTimeCray\fR
-Timing of Cray APIs
-.IP
-
-.TP
 \fBTraceJobs\fR
 Trace jobs in slurmctld. It will print detailed job information
 including state, job ids and allocated nodes counter.
@@ -1230,8 +1232,8 @@ completes (e.g. "/usr/local/slurm/epilog"). If it is not an absolute path name
 directory as the slurm.conf file. A glob pattern (See \fBglob\fR (7)) may also
 be used to run more than one epilog script (e.g. "/etc/slurm/epilog.d/*").
 When more than one epilog script is configured, they are executed in reverse
-order. The Epilog script or scripts may be used to purge files, disable user
-login, etc.
+alphabetical order (z-a -> Z-A -> 9-0). The Epilog script(s) may be used
+to purge files, disable user login, etc.
 By default there is no epilog.
 See \fBProlog and Epilog Scripts\fR for more information.
 .IP
@@ -1843,11 +1845,6 @@ Acceptable values at present include:
 .IP
 .RS
 .TP 20
-\fBjob_container/cncu\fR
-Used only for Cray systems (CNCU = Compute Node Clean Up)
-.IP
-
-.TP
 \fBjob_container/tmpfs\fR
 Used to create a private namespace on the filesystem for jobs, which houses
 temporary file systems (/tmp and /dev/shm) for each job. 'PrologFlags=Contain'
@@ -3240,8 +3237,8 @@ job step from a new job allocation. If it is not an absolute path name (i.e. it
 does not start with a slash), it will be searched for in the same directory as
 the slurm.conf file. A glob pattern (See \fBglob\fR (7)) may also be used to
 specify more than one program to run (e.g. "/etc/slurm/prolog.d/*"). When more
-than one prolog script is configured, they are executed in reverse order.
-The slurmd executes the prolog before starting
+than one prolog script is configured, they are executed in reverse alphabetical
+order (z-a -> Z-A -> 9-0). The slurmd executes the prolog before starting
 the first job step.  The prolog script or scripts may be used to purge files,
 enable user login, etc.  By default there is no prolog. Any configured script
 is expected to complete execution quickly (in less time than
@@ -3735,10 +3732,7 @@ nodes that are in use.
 This will tend to leave currently idle resources available for backfilling
 longer running jobs, but may result in allocations having less than optimal
 network topology.
-This option is currently only supported by the
-select/cons_tres plugin (or select/cray_aries with SelectTypeParameters set to
-"OTHER_CONS_TRES", which layers the select/cray_aries plugin
-over the select/cons_tres plugin).
+This option is currently only supported by the select/cons_tres plugin.
 .IP
 
 .TP
@@ -4499,12 +4493,6 @@ This is the default value.
 .IP
 
 .TP
-\fBselect/cray_aries\fR
-for a Cray system.
-The default value is "select/cray_aries" for all Cray systems.
-.IP
-
-.TP
 \fBselect/linear\fR
 for allocation of entire nodes assuming a one\-dimensional array of nodes in
 which sequentially ordered nodes are preferable.
@@ -4529,23 +4517,10 @@ The only supported options for \fBSelectType=select/linear\fR are
 prevents memory over subscription with job preemption or gang scheduling.
 By default \fBSelectType=select/linear\fR allocates whole nodes to jobs without
 considering their memory consumption.
-By default \fBSelectType=select/cons_tres\fR, and
-\fBSelectType=select/cray_aries\fR use
-\fBCR_Core_Memory\fR, which allocates Core
-to jobs with considering their memory consumption.
+By default \fBSelectType=select/cons_tres\fR uses \fBCR_Core_Memory\fR, which
+allocates Core to jobs while considering their memory consumption.
 
 A restart of slurmctld is required for changes to this parameter to take effect.
-
-The following options are supported for \fBSelectType=select/cray_aries\fR:
-.IP
-.RS
-.TP
-\fBOTHER_CONS_TRES\fR
-Layer the select/cons_tres plugin under the select/cray_aries plugin, the default is
-to layer on select/linear.  This also allows all the options available for
-\fBSelectType=select/cons_tres\fR.
-.IP
-.RE
 
 The following options are supported by the \fBSelectType=select/cons_tres\fR
 plugin:
@@ -4689,6 +4664,18 @@ being denied the job will be allocated with 2 gpus. 1 using 10 shards and the
 other using 2 shards.
 .IP
 
+.TP
+\fBENFORCE_BINDING_GRES\fR
+Set \fB\-\-gres\-flags=enforce\-binding\fR as the default in every job.
+This can be overridden with \fB\-\-gres\-flags=disable\-binding\fR.
+.IP
+
+.TP
+\fBONE_TASK_PER_SHARING_GRES\fR
+Set \fB\-\-gres\-flags=one\-task\-per\-sharing\fR as the default in every job.
+This can be overridden with \fB\-\-gres\-flags=multiple\-tasks\-per\-sharing\fR.
+.IP
+
 .LP
 \fBNOTE\fR: If memory isn't configured as a consumable resource (CR_CPU,
 CR_Core or CR_Socket without _Memory) memory can be oversubscribed and will not
@@ -4721,7 +4708,7 @@ address manipulation.
 The level of detail to provide \fBslurmctld\fR daemon's logs.
 The default value is \fBinfo\fR.
 If the \fBslurmctld\fR daemon is initiated with \-v or \-\-verbose options,
-that debug level will be preserve or restored upon reconfiguration.
+that debug level will be preserved or restored upon reconfiguration.
 .IP
 .RS
 .TP 10
@@ -4834,6 +4821,11 @@ DNS, this step can be avoided by configuring this option.
 .IP
 
 .TP
+\fBdisable_triggers\fR
+Disable the ability to register new triggers.
+.IP
+
+.TP
 \fBenable_configless\fR
 Permit "configless" operation by the slurmd, slurmstepd, and user commands.
 When enabled the slurmd will be permitted to retrieve config files and
@@ -4933,7 +4925,7 @@ steady\-state RPC load established by the refill period and rate.
 .IP
 
 .TP
-\fBrl_log_freq\fR
+\fBrl_log_freq=\fR
 The maximum frequency (in seconds) for which logs about RPC limit being exceeded
 by an individual user are printed to the logs. Set to 0 to see every incidence.
 Set to -1 to disable the log message entirely.
@@ -5731,12 +5723,6 @@ when configuring TaskPlugin, and setting \fBConstrainCores=yes\fR in
 \fBcgroup.conf\fR. This setup uses the task/affinity plugin for setting the
 cpu mask for tasks and uses the task/cgroup plugin to fence tasks into the
 allocated cpus.
-
-\fBNOTE\fR: For CRAY systems only: task/cgroup must be used with task/cray_aries
-in TaskPlugin. For CRAY systems a configuration like this is recommended:
-.nf
-TaskPlugin=task/cray_aries,task/cgroup,task/affinity
-.fi
 .RE
 .IP
 
@@ -5780,7 +5766,6 @@ If specialized cores or CPUs are identified for the node (i.e. the
 then Slurm daemons running on the compute node (i.e. slurmd and slurmstepd)
 should run outside of those resources (i.e. specialized resources are
 completely unavailable to Slurm daemons and jobs spawned by Slurm).
-This option may not be used with the \fBtask/cray_aries\fR plugin.
 .IP
 
 .TP
@@ -5962,7 +5947,8 @@ default for other systems, best\-fit logic over one\-dimensional topology
 
 .TP
 \fBtopology/tree\fR
-used for a hierarchical network, as described in the \fBtopology.conf\fR(5)
+used for a hierarchical network with the select/cons_tres plugin,
+as described in the \fBtopology.conf\fR(5)
 man page
 .RE
 .IP

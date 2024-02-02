@@ -108,10 +108,7 @@ typedef struct {
 
 const plugin_id_name plugin_ids[] = {
 	{ SELECT_PLUGIN_LINEAR, "linear" },
-	{ SELECT_PLUGIN_SERIAL, "serial" },
-	{ SELECT_PLUGIN_CRAY_LINEAR, "cray_aries+linear" },
 	{ SELECT_PLUGIN_CONS_TRES, "cons_tres" },
-	{ SELECT_PLUGIN_CRAY_CONS_TRES, "cray_aries+cons_tres" },
 };
 
 extern char *select_plugin_id_to_string(int plugin_id)
@@ -181,18 +178,6 @@ extern int select_g_init(bool only_default)
 
 	if ( select_context )
 		goto done;
-
-	if (working_cluster_rec) {
-		/* just ignore warnings here */
-	} else {
-#ifdef HAVE_NATIVE_CRAY
-		if (xstrcasecmp(slurm_conf.select_type, "select/cray_aries")) {
-			error("%s is incompatible with a Cray/Aries system.",
-			      slurm_conf.select_type);
-			fatal("Use SelectType=select/cray_aries");
-		}
-#endif
-	}
 
 	select_context_cnt = 0;
 
@@ -280,63 +265,14 @@ fini:	slurm_mutex_unlock(&select_context_lock);
 /* Get this plugin's sequence number in Slurm's internal tables */
 extern int select_get_plugin_id_pos(uint32_t plugin_id)
 {
-	int i;
-	static bool cray_other_cons_tres = false;
-
 	xassert(select_context_cnt >= 0);
-again:
-	for (i = 0; i < select_context_cnt; i++) {
+
+	for (int i = 0; i < select_context_cnt; i++) {
 		if (*(ops[i].plugin_id) == plugin_id)
-			break;
+			return i;
 	}
-	if (i >= select_context_cnt) {
-		/*
-		 * Put on the extra Cray select plugins that do not get
-		 * generated automatically.
-		 */
-		if (!cray_other_cons_tres &&
-		    ((plugin_id == SELECT_PLUGIN_CRAY_CONS_TRES) ||
-		     (plugin_id == SELECT_PLUGIN_CRAY_LINEAR))) {
-			char *type = "select", *name = "select/cray_aries";
-			uint16_t save_params = slurm_conf.select_type_param;
-			uint16_t params;
-			int cray_plugin_id;
 
-			cray_other_cons_tres = true;
-
-			if (plugin_id == SELECT_PLUGIN_CRAY_LINEAR) {
-				params = save_params & ~CR_OTHER_CONS_TRES;
-				cray_plugin_id = SELECT_PLUGIN_CRAY_CONS_TRES;
-			} else {	/* SELECT_PLUGIN_CRAY_CONS_TRES */
-				params = save_params | CR_OTHER_CONS_TRES;
-				cray_plugin_id = SELECT_PLUGIN_CRAY_LINEAR;
-			}
-
-			for (i = 0; i < select_context_cnt; i++) {
-				if (*(ops[i].plugin_id) == cray_plugin_id)
-					break;
-			}
-
-			if (i >= select_context_cnt)
-				goto end_it;	/* No match */
-
-			slurm_mutex_lock(&select_context_lock);
-			slurm_conf.select_type_param = params;
-			plugin_context_destroy(select_context[i]);
-			select_context[i] =
-				plugin_context_create(type, name,
-						      (void **)&ops[i],
-						      node_select_syms,
-						      sizeof(node_select_syms));
-			slurm_conf.select_type_param = save_params;
-			slurm_mutex_unlock(&select_context_lock);
-			goto again;
-		}
-
-	end_it:
-		return SLURM_ERROR;
-	}
-	return i;
+	return SLURM_ERROR;
 }
 
 /* If the slurmctld is running a linear based select plugin return 1
@@ -349,7 +285,6 @@ extern int select_running_linear_based(void)
 
 	switch (*(ops[select_context_default].plugin_id)) {
 	case SELECT_PLUGIN_LINEAR: // select/linear
-	case SELECT_PLUGIN_CRAY_LINEAR: // select/cray -> linear
 		rc = 1;
 		break;
 	default:
@@ -386,11 +321,6 @@ extern char *select_type_param_string(uint16_t select_type_param)
 	else if (select_type_param & CR_MEMORY)
 		strcat(select_str, "CR_MEMORY");
 
-	if (select_type_param & CR_OTHER_CONS_TRES) {
-		if (select_str[0])
-			strcat(select_str, ",");
-		strcat(select_str, "OTHER_CONS_TRES");
-	}
 	if (select_type_param & CR_ONE_TASK_PER_CORE) {
 		if (select_str[0])
 			strcat(select_str, ",");
@@ -717,8 +647,6 @@ extern int select_g_select_nodeinfo_unpack(dynamic_plugin_data_t **nodeinfo,
 		/* cons_res was removed; convert to cons_tres */
 		if (plugin_id == SELECT_PLUGIN_CONS_RES) {
 			plugin_id = SELECT_PLUGIN_CONS_TRES;
-		} else if (plugin_id == SELECT_PLUGIN_CRAY_CONS_RES) {
-			plugin_id = SELECT_PLUGIN_CRAY_CONS_TRES;
 		}
 
 		if ((i = select_get_plugin_id_pos(plugin_id)) == SLURM_ERROR) {
@@ -984,8 +912,6 @@ extern int select_g_select_jobinfo_unpack(dynamic_plugin_data_t **jobinfo,
 		/* cons_res was removed; convert to cons_tres */
 		if (plugin_id == SELECT_PLUGIN_CONS_RES) {
 			plugin_id = SELECT_PLUGIN_CONS_TRES;
-		} else if (plugin_id == SELECT_PLUGIN_CRAY_CONS_RES) {
-			plugin_id = SELECT_PLUGIN_CRAY_CONS_TRES;
 		}
 
 		if ((i = select_get_plugin_id_pos(plugin_id)) == SLURM_ERROR) {

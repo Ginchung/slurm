@@ -15,6 +15,60 @@ documents those changes that are of interest to users and administrators.
  -- data_parser/v0.0.41 - Fix how nice values are parsed for job submissions.
  -- data_parser/v0.0.41 - Fix regression where parsing error did not result in
     invalid request being rejected.
+ -- Print an error message in 'scontrol reboot' when a node reboot request
+    is ignored due to the current node state.
+ -- squeue - Add "--notme" option.
+ -- data_parser/v0.0.41 - change "association.id" to just include the int "id"
+    rather than include redundant assoc info (cluster, user, partition, account)
+    that's already included in the "association" object.
+ -- data_parser/v0.0.41 - Improve parsing of numeric user id.
+ -- data_parser/v0.0.41 - Improve parsing of numeric group id.
+ -- slurmrestd - Generated openapi.json will only populate "deprecated" fields
+    if true. False is the default value and does not require being present.
+ -- slurmrestd - Populate missing "deprecated" fields in  openapi.json.
+ -- slurmrestd - Corrected deprecated fields in generated openapi.json not
+    getting populated.
+ -- slurmrestd - Generated openapi.json will have reduced number of "$ref"
+    fields. Where there was only 1 reference for the schema, the "$ref" schema
+    will be directly populated in place.
+ -- slurmrestd - Rename *_NO_VAL schemas in generated openapi.json to have
+    _struct and to pass along correct integer sizing when possible.
+ -- slurmrestd - Correct description fields in generated openapi.json where
+    descriptions were not present or too generic.
+ -- Remove support for Cray XC ("cray_aries") systems.
+ -- Prevent backup slurmctld from taking over if the heartbeat file is
+    still being updated.  Failure to ping may have been due to clock skew.
+ -- serializer/yaml - Converted to new parsing interface in libyaml to improve
+    parsing compatibility.
+ -- Removed TopologyPlugin tree and dragonfly support from select/linear.
+    If those topology plugins are desired please switch to select/cons_tres.
+
+* Changes in Slurm 23.11.4
+==========================
+ -- Fix a memory leak when updating partition nodes.
+ -- Don't leave a partition around if it fails to create with scontrol.
+ -- Fix segfault when creating partition with bad node list from scontrol.
+ -- Fix preserving partition nodes on bad node list update from scontrol.
+ -- Fix assertion in developer mode on a failed message unpack.
+ -- Fix repeat POWER_DOWN requests making the nodes available for ping.
+ -- Fix rebuilding job alias_list on restart when nodes are still powering up.
+ -- Fix INVALID nodes running health check.
+ -- Fix cloud/future nodes not setting addresses on invalid registration.
+ -- scrun - Remove the requirement to set the SCRUN_WORKING_DIR environment
+    variable. This was a regression in 23.11.
+ -- Add warning for using select/linear with topology/tree.
+    This combination will not be supported in the next major version.
+ -- Fix health check program not being run after first pass of all nodes when
+    using MaxNodeCount.
+ -- sacct - Set process exit code to one for all errors.
+ -- Add SlurmctldParameters=disable_triggers option.
+ -- Fix issue running steps when the allocation requested an exclusive
+    allocation shards along with shards.
+
+* Changes in Slurm 23.11.3
+==========================
+ -- Fix debian/changelog file to reflect the correct version so the packages
+    are generated correctly.
 
 * Changes in Slurm 23.11.2
 ==========================
@@ -45,6 +99,74 @@ documents those changes that are of interest to users and administrators.
  -- data_parser/v0.0.40 - Fix how nice values are parsed for job submissions.
  -- data_parser/v0.0.40 - Fix regression where parsing error did not result in
     invalid request being rejected.
+ -- Fix segfault in front-end node registration.
+ -- Prevent jobs using none typed gpus from being killed by the controller after
+    a reconfig or restart.
+ -- Fix deadlock situation in the dbd when adding associations.
+ -- Update default values of text/blob columns when updating from old mysql
+    versions in more situations.  This improves a previous fix to handle an
+    uncommon case when upgrading mysql/mariadb.
+ -- Fix rpmbuild in openSUSE/SLES due to incorrect mariadb dependency.
+ -- Fix compilation on RHEL 7.
+ -- When upgrading the slurmdbd to 23.11, avoid generating a query to update
+    the association table that is larger than max_allowed_packet which would
+    result in an upgrade failure.
+ -- Fix rare deadlock when a dynamic node registers at the same time that a
+    once per minute background task occurs.
+ -- Fix build issue on 32-bit systems.
+ -- data_parser/v0.0.40 - Fix enumerated strings in OpenAPI specification not
+    have type field specified.
+ -- Improve scontrol show job -d information of used shared gres (shard/mps)
+    topology.
+ -- Allow Slurm to compile without MUNGE if --without-munge is used as an
+    argument to configure.
+ -- accounting_storage/mysql - Fix usage query to use new lineage column
+    instead of lft/rgt.
+ -- slurmrestd - Improve handling of missing parsers when content plugins
+    expect parsers not loaded.
+ -- slurmrestd - Correct parsing of StepIds when querying jobs.
+ -- slurmrestd - Improve error from parsing failures of lists.
+ -- slurmrestd - Improve parsing of singular values for lists.
+ -- accounting_storage/mysql - Fix PrivateData=User when listing associations.
+ -- Disable sorting of dynamic nodes to avoid issues when restarting with
+    heterogenous jobs that cause jobs to abort on restart.
+ -- Don't allow deletion of non-dynamic nodes.
+ -- accounting_storage/mysql - Fix issue adding partition based associations.
+ -- Respect non-"slurm" settings for I_MPI_HYDRA_BOOTSTRAP and HYDRA_BOOTSTRAP
+    and avoid injecting the --external-launcher option which will cause
+    mpirun/mpiexec to fail with an unexpected argument error.
+ -- Fix bug where scontrol hold would change node count for jobs with
+    implicitly defined node counts.
+ -- data_parser/v0.0.40 - Fix regression of support for "hold" in
+    job description.
+ -- Avoid sending KILL RPCs to unresolvable POWERING_UP and POWERED_DOWN nodes.
+ -- data_parser/v0.0.38 - Fix several potential NULL dereferences that could
+    cause slurmrestd to crash.
+ -- Add --gres-flags=one-task-per-sharing. Do not allow different tasks in to be
+    allocated shared gres from the same sharing gres.
+ -- Add SelectTypeParameters=ENFORCE_BINDING_GRES and ONE_TASK_PER_SHARING_GRES.
+    This gives default behavior for a job's --gres-flags.
+ -- Alter the networking code to try connecting to the backup controllers
+    if the DNS lookup for the primary SlurmctldHost fails.
+ -- Alter the name resolution to only log at verbose() in client commands
+    on failures. This allows for HA setups where the DNS entries are withdrawn
+    for some SlurmctldHost entries without flooding the user with errors.
+ -- Prevent slurmscriptd PID leaks when running slurmctld in foreground mode.
+ -- Open all slurmctld listening ports at startup, and persist throughout.
+    This also changes the backup slurmctld process to open the SlurmctldPort
+    range, instead of only the first.
+ -- Fix backup slurmctld shutting down instead of resuming standby duty if it
+    took control.
+ -- Fix race condition that delayed the primary slurmctld resuming when taking
+    control from a backup controller.
+ -- srun - Ensure processed messages are meant for this job in case of a
+    rapidly-reused TCP port.
+ -- srun - Prevent step launch failure while waiting for step allocation if
+    a stray message is received.
+ -- Fix backup slurmctld to be able to respond to configless config file
+    requests correctly.
+ -- Fix slurmctld crashing when recovering from a failed reconfigure.
+ -- Fix slurmscriptd operation after recovering from a failed reconfigure.
 
 * Changes in Slurm 23.11.1
 ==========================
@@ -478,6 +600,9 @@ documents those changes that are of interest to users and administrators.
 
 * Changes in Slurm 23.02.8
 ==========================
+ -- Fix rare deadlock when a dynamic node registers at the same time that a
+    once per minute background task occurs.
+ -- Fix assertion in developer mode on a failed message unpack.
 
 * Changes in Slurm 23.02.7
 ==========================

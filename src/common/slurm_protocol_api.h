@@ -155,19 +155,12 @@ extern uint16_t slurm_get_ext_sensors_freq(void);
  */
 char *slurm_get_select_type(void);
 
-/** Return true if (remote) system runs Cray XT/XE */
-bool is_cray_select_type(void);
-
 /* slurm_get_srun_port_range()
  *
  * Return the array with 2 members indicating the
  * min and max ports that srun should use to listen to.
  */
 uint16_t *slurm_get_srun_port_range(void);
-
-/* slurm_get_core_spec_plugin
- * RET core_spec plugin name, must be xfreed by caller */
-char *slurm_get_core_spec_plugin(void);
 
 /*
  * slurm_get_jobcomp_type
@@ -291,18 +284,6 @@ int slurm_send_node_msg(int open_fd, slurm_msg_t *msg);
 /**********************************************************************\
  * msg connection establishment functions used by msg clients
 \**********************************************************************/
-
-/*
- * Calls connect to make a connection-less datagram connection to the
- *	primary or secondary slurmctld message engine
- * IN/OUT addr       - address of controller contacted
- * IN/OUT use_backup - IN: whether to try the backup first or not
- *                     OUT: set to true if connection established with backup
- * IN comm_cluster_rec	- Communication record (host/port/version)/
- * RET slurm_fd	- file descriptor of the connection created
- */
-extern int slurm_open_controller_conn(slurm_addr_t *addr, bool *use_backup,
-				      slurmdb_cluster_rec_t *comm_cluster_rec);
 
 /*
  * Calls connect to make a connection-less datagram connection to a specific

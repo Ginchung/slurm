@@ -100,7 +100,6 @@
 #include "src/interfaces/acct_gather_energy.h"
 #include "src/interfaces/auth.h"
 #include "src/interfaces/cgroup.h"
-#include "src/interfaces/core_spec.h"
 #include "src/interfaces/cred.h"
 #include "src/interfaces/gpu.h"
 #include "src/interfaces/gres.h"
@@ -203,7 +202,6 @@ static void      _handle_connection(int fd, slurm_addr_t *client);
 static void      _hup_handler(int);
 static void      _increment_thd_count(void);
 static void      _init_conf(void);
-static bool      _is_core_spec_cray(void);
 static int       _memory_spec_init(void);
 static void      _msg_engine(void);
 static void _notify_parent_of_success(void);
@@ -366,8 +364,6 @@ main (int argc, char **argv)
 		error("Unable to restore job_container state.");
 	if (prep_g_init(NULL) != SLURM_SUCCESS)
 		fatal("failed to initialize prep plugin");
-	if (core_spec_g_init() < 0)
-		fatal("Unable to initialize core specialization plugin.");
 	if (switch_init(0) < 0)
 		fatal("Unable to initialize switch plugin.");
 	if (node_features_g_init() != SLURM_SUCCESS)
@@ -988,9 +984,7 @@ _read_config(void)
 	 * We can't call slurm_select_cr_type() because we don't load the select
 	 * plugin here.
 	 */
-	if (!xstrcmp(cf->select_type, "select/cons_tres") ||
-	    (!xstrcmp(cf->select_type, "select/cray_aries") &&
-	     (cf->select_type_param & CR_OTHER_CONS_TRES)))
+	if (!xstrcmp(cf->select_type, "select/cons_tres"))
 		cr_flag = true;
 
 	if (cf->preempt_mode & PREEMPT_MODE_GANG)
@@ -2332,7 +2326,6 @@ _slurmd_fini(void)
 	assoc_mgr_fini(false);
 	mpi_fini();
 	node_features_g_fini();
-	core_spec_g_fini();
 	jobacct_gather_fini();
 	acct_gather_profile_fini();
 	cred_state_fini();
@@ -2555,17 +2548,6 @@ static int _resource_spec_init(void)
 	return SLURM_SUCCESS;
 }
 
-/* Return true if CoreSpecPlugin=core_spec/cray */
-static bool _is_core_spec_cray(void)
-{
-	bool use_core_spec_cray = false;
-	char *core_spec_plugin = slurm_get_core_spec_plugin();
-	if (core_spec_plugin && strstr(core_spec_plugin, "cray"))
-		use_core_spec_cray = true;
-	xfree(core_spec_plugin);
-	return use_core_spec_cray;
-}
-
 /*
  * If configured, initialize core specialization
  */
@@ -2584,10 +2566,6 @@ static int _core_spec_init(void)
 	if ((conf->core_spec_cnt == 0) && (conf->cpu_spec_list == NULL)) {
 		debug("Resource spec: No specialized cores configured by "
 		      "default on this node");
-		return SLURM_SUCCESS;
-	}
-	if (_is_core_spec_cray()) {	/* No need to use cgroups */
-		debug("Using core_spec/cray to manage specialized cores");
 		return SLURM_SUCCESS;
 	}
 
@@ -2922,8 +2900,6 @@ extern int run_script_health_check(void)
 		 * pointing to the wrong place otherwise.
 		 */
 		run_command_args.env = env;
-		if (xstrstr(slurm_conf.job_container_plugin, "cncu"))
-			run_command_args.container_join = container_g_join;
 
 		resp = run_command(&run_command_args);
 		if (rc) {

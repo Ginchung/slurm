@@ -1530,7 +1530,76 @@ _unpack_node_info_members(node_info_t * node, buf_t *buffer,
 	xassert(node);
 	slurm_init_node_info_t(node, false);
 
-	if (protocol_version >= SLURM_23_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_24_08_PROTOCOL_VERSION) {
+		safe_unpackstr(&node->name, buffer);
+		safe_unpackstr(&node->node_hostname, buffer);
+		safe_unpackstr(&node->node_addr, buffer);
+		safe_unpackstr(&node->bcast_address, buffer);
+		safe_unpack16(&node->port, buffer);
+		safe_unpack32(&node->next_state, buffer);
+		safe_unpack32(&node->node_state, buffer);
+		safe_unpackstr(&node->version, buffer);
+
+		safe_unpack16(&node->cpus, buffer);
+		safe_unpack16(&node->boards, buffer);
+		safe_unpack16(&node->sockets, buffer);
+		safe_unpack16(&node->cores, buffer);
+		safe_unpack16(&node->threads, buffer);
+
+		safe_unpack64(&node->real_memory, buffer);
+		safe_unpack32(&node->tmp_disk, buffer);
+
+		safe_unpackstr(&node->mcs_label, buffer);
+		safe_unpack32(&node->owner, buffer);
+		safe_unpack16(&node->core_spec_cnt, buffer);
+		safe_unpack32(&node->cpu_bind, buffer);
+		safe_unpack64(&node->mem_spec_limit, buffer);
+		safe_unpackstr(&node->cpu_spec_list, buffer);
+		safe_unpack16(&node->cpus_efctv, buffer);
+
+		safe_unpack32(&node->cpu_load, buffer);
+		safe_unpack64(&node->free_mem, buffer);
+		safe_unpack32(&node->weight, buffer);
+		safe_unpack32(&node->reason_uid, buffer);
+
+		safe_unpack_time(&node->boot_time, buffer);
+		safe_unpack_time(&node->last_busy, buffer);
+		safe_unpack_time(&node->reason_time, buffer);
+		safe_unpack_time(&node->resume_after, buffer);
+		safe_unpack_time(&node->slurmd_start_time, buffer);
+
+		if (select_g_select_nodeinfo_unpack(&node->select_nodeinfo,
+						    buffer, protocol_version)
+		    != SLURM_SUCCESS)
+			goto unpack_error;
+
+		safe_unpackstr(&node->arch, buffer);
+		safe_unpackstr(&node->features, buffer);
+		safe_unpackstr(&node->features_act, buffer);
+		safe_unpackstr(&node->gres, buffer);
+		safe_unpackstr(&node->gres_drain, buffer);
+		safe_unpackstr(&node->gres_used, buffer);
+		safe_unpackstr(&node->os, buffer);
+		safe_unpackstr(&node->comment, buffer);
+		safe_unpackstr(&node->extra, buffer);
+		safe_unpackstr(&node->instance_id, buffer);
+		safe_unpackstr(&node->instance_type, buffer);
+		safe_unpackstr(&node->reason, buffer);
+		if (acct_gather_energy_unpack(&node->energy, buffer,
+					      protocol_version, 1)
+		    != SLURM_SUCCESS)
+			goto unpack_error;
+		if (ext_sensors_data_unpack(&node->ext_sensors, buffer,
+					    protocol_version)
+		    != SLURM_SUCCESS)
+			goto unpack_error;
+		if (power_mgmt_data_unpack(&node->power, buffer,
+					   protocol_version) != SLURM_SUCCESS)
+			goto unpack_error;
+
+		safe_unpackstr(&node->tres_fmt_str, buffer);
+		safe_unpackstr(&node->resv_name, buffer);
+	} else if (protocol_version >= SLURM_23_11_PROTOCOL_VERSION) {
 		safe_unpackstr(&node->name, buffer);
 		safe_unpackstr(&node->node_hostname, buffer);
 		safe_unpackstr(&node->node_addr, buffer);
@@ -3057,7 +3126,7 @@ _pack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t * build_ptr, buf_t *buffer,
 		              build_ptr->control_cnt, buffer);
 		packstr_array(build_ptr->control_machine,
 		              build_ptr->control_cnt, buffer);
-		packstr(build_ptr->core_spec_plugin, buffer);
+		packnull(buffer); /* was core_spec_plugin */
 		pack32(build_ptr->cpu_freq_def, buffer);
 		pack32(build_ptr->cpu_freq_govs, buffer);
 		packstr(build_ptr->cred_type, buffer);
@@ -3349,7 +3418,7 @@ _pack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t * build_ptr, buf_t *buffer,
 		              build_ptr->control_cnt, buffer);
 		packstr_array(build_ptr->control_machine,
 		              build_ptr->control_cnt, buffer);
-		packstr(build_ptr->core_spec_plugin, buffer);
+		packnull(buffer); /* was core_spec_plugin */
 		pack32(build_ptr->cpu_freq_def, buffer);
 		pack32(build_ptr->cpu_freq_govs, buffer);
 		packstr(build_ptr->cred_type, buffer);
@@ -3640,7 +3709,7 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
 		                     &uint32_tmp, buffer);
 		if (build_ptr->control_cnt != uint32_tmp)
 			goto unpack_error;
-		safe_unpackstr(&build_ptr->core_spec_plugin, buffer);
+		safe_skipstr(buffer); /* was core_spec_plugin */
 		safe_unpack32(&build_ptr->cpu_freq_def, buffer);
 		safe_unpack32(&build_ptr->cpu_freq_govs, buffer);
 		safe_unpackstr(&build_ptr->cred_type, buffer);
@@ -3875,7 +3944,6 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
 		safe_unpack16(&build_ptr->wait_time, buffer);
 		safe_unpackstr(&build_ptr->x11_params, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		char *tmp_char;
 		/* unpack timestamp of snapshot */
 		safe_unpack_time(&build_ptr->last_update, buffer);
 
@@ -3928,7 +3996,7 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
 		                     &uint32_tmp, buffer);
 		if (build_ptr->control_cnt != uint32_tmp)
 			goto unpack_error;
-		safe_unpackstr(&build_ptr->core_spec_plugin, buffer);
+		safe_skipstr(buffer); /* was core_spec_plugin */
 		safe_unpack32(&build_ptr->cpu_freq_def, buffer);
 		safe_unpack32(&build_ptr->cpu_freq_govs, buffer);
 		safe_unpackstr(&build_ptr->cred_type, buffer);
@@ -3982,10 +4050,8 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
 		safe_unpackstr(&build_ptr->job_comp_user, buffer);
 		safe_unpackstr(&build_ptr->job_container_plugin, buffer);
 
-		safe_unpackstr(&tmp_char, buffer);
-		xfree(tmp_char);
-		safe_unpackstr(&tmp_char, buffer);
-		xfree(tmp_char);
+		safe_skipstr(buffer);
+		safe_skipstr(buffer);
 		if (slurm_unpack_list(&build_ptr->job_defaults_list,
 		                      job_defaults_unpack, xfree_ptr,
 		                      buffer,protocol_version) != SLURM_SUCCESS)
@@ -4088,8 +4154,7 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **build_buffer_ptr,
 		safe_unpackstr(&build_ptr->resv_prolog, buffer);
 		safe_unpack16(&build_ptr->ret2service, buffer);
 
-		safe_unpackstr(&tmp_char, buffer);
-		xfree(tmp_char);
+		safe_skipstr(buffer);
 		safe_unpackstr(&build_ptr->sched_params, buffer);
 		safe_unpackstr(&build_ptr->sched_logfile, buffer);
 		safe_unpack16(&build_ptr->sched_log_level, buffer);
@@ -5824,15 +5889,13 @@ static int _unpack_launch_tasks_request_msg(launch_tasks_request_msg_t **msg_ptr
 		safe_unpackstr(&msg->x11_target, buffer);
 		safe_unpack16(&msg->x11_target_port, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		char *tmp_char;
 		if (unpack_step_id_members(&msg->step_id, buffer,
 					   protocol_version) != SLURM_SUCCESS)
 			goto unpack_error;
 
 		safe_unpack32(&uint32_tmp, buffer); /* was launch_uid */
 		safe_unpack32(&uint32_tmp, buffer); /* was launch_gid */
-		safe_unpackstr(&tmp_char, buffer); /* was user_name */
-		xfree(tmp_char);
+		safe_skipstr(buffer); /* was user_name */
 		safe_unpack32_array(&msg->gids, &msg->ngids, buffer);
 
 		safe_unpack32(&msg->het_job_node_offset, buffer);
@@ -6319,7 +6382,6 @@ static int _unpack_prolog_launch_msg(slurm_msg_t *smsg, buf_t *buffer)
 						    smsg->protocol_version)))
 			goto unpack_error;
 	} else if (smsg->protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		char *tmp_char;
 		if (gres_prep_unpack(&msg->job_gres_prep, buffer,
 				     smsg->protocol_version))
 			goto unpack_error;
@@ -6330,10 +6392,8 @@ static int _unpack_prolog_launch_msg(slurm_msg_t *smsg, buf_t *buffer)
 
 		safe_unpackstr(&msg->alias_list, buffer);
 		safe_unpackstr(&msg->nodes, buffer);
-		safe_unpackstr(&tmp_char, buffer); /* was std_err */
-		xfree(tmp_char);
-		safe_unpackstr(&tmp_char, buffer); /* was std_out */
-		xfree(tmp_char);
+		safe_skipstr(buffer); /* was std_err */
+		safe_skipstr(buffer); /* was std_out */
 		safe_unpackstr(&msg->work_dir, buffer);
 
 		safe_unpack16(&msg->x11, buffer);
@@ -7211,13 +7271,11 @@ _unpack_batch_job_launch_msg(batch_job_launch_msg_t ** msg, buf_t *buffer,
 		safe_unpackstr(&launch_msg_ptr->tres_bind, buffer);
 		safe_unpackstr(&launch_msg_ptr->tres_freq, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		char *tmp_char;
 		safe_unpack32(&launch_msg_ptr->job_id, buffer);
 		safe_unpack32(&launch_msg_ptr->het_job_id, buffer);
 		safe_unpack32(&uint32_tmp, buffer); /* was uid */
 		safe_unpack32(&uint32_tmp, buffer); /* was gid */
-		safe_unpackstr(&tmp_char, buffer); /* was user_name */
-		xfree(tmp_char);
+		safe_skipstr(buffer); /* was user_name */
 		safe_unpack32_array(&launch_msg_ptr->gids,
 				    &launch_msg_ptr->ngids, buffer);
 
@@ -11082,7 +11140,7 @@ unpack_msg(slurm_msg_t * msg, buf_t *buffer)
 		 * did not proactively clear it. (Which, instead, may cause
 		 * a memory leak. But that's preferrable.)
 		 */
-		xassert(msg->data);
+		xassert(!msg->data);
 		msg->data = NULL;
 	}
 	return rc;

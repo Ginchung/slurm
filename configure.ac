@@ -247,7 +247,6 @@ PKG_CHECK_MODULES([CHECK], [check >= 0.9.8], [ac_have_check="yes"], [ac_have_che
 AM_CONDITIONAL(HAVE_CHECK, test "x$ac_have_check" = "xyes")
 
 X_AC_SVIEW
-X_AC_CRAY
 X_AC_HPE_SLINGSHOT
 
 dnl checks for system services.
@@ -261,7 +260,7 @@ dnl check for how to emulate setproctitle
 dnl
 X_AC_SETPROCTITLE
 
-dnl check for debug compilation, must follow X_AC_CRAY
+dnl check for debug compilation
 dnl
 X_AC_DEBUG
 
@@ -353,9 +352,6 @@ dnl All slurm Makefiles:
 AC_CONFIG_FILES([Makefile
 		 auxdir/Makefile
 		 contribs/Makefile
-		 contribs/cray/Makefile
-		 contribs/cray/csm/Makefile
-		 contribs/cray/slurmsmwd/Makefile
 		 contribs/lua/Makefile
 		 contribs/nss_slurm/Makefile
 		 contribs/openlava/Makefile
@@ -427,8 +423,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/cli_filter/lua/Makefile
 		 src/plugins/cli_filter/syslog/Makefile
 		 src/plugins/cli_filter/user_defaults/Makefile
-		 src/plugins/core_spec/Makefile
-		 src/plugins/core_spec/cray_aries/Makefile
 		 src/plugins/cred/Makefile
 		 src/plugins/cred/common/Makefile
 		 src/plugins/cred/munge/Makefile
@@ -455,11 +449,9 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/hash/Makefile
 		 src/plugins/hash/k12/Makefile
 		 src/plugins/job_container/Makefile
-		 src/plugins/job_container/cncu/Makefile
 		 src/plugins/job_container/tmpfs/Makefile
 		 src/plugins/job_submit/Makefile
 		 src/plugins/job_submit/all_partitions/Makefile
-		 src/plugins/job_submit/cray_aries/Makefile
 		 src/plugins/job_submit/defaults/Makefile
 		 src/plugins/job_submit/logging/Makefile
 		 src/plugins/job_submit/lua/Makefile
@@ -489,11 +481,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/mpi/pmix/Makefile
 		 src/plugins/node_features/Makefile
 		 src/plugins/node_features/helpers/Makefile
-		 src/plugins/node_features/knl_cray/Makefile
 		 src/plugins/node_features/knl_generic/Makefile
-		 src/plugins/power/Makefile
-		 src/plugins/power/common/Makefile
-		 src/plugins/power/cray_aries/Makefile
 		 src/plugins/preempt/Makefile
 		 src/plugins/preempt/partition_prio/Makefile
 		 src/plugins/preempt/qos/Makefile
@@ -504,7 +492,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/priority/multifactor/Makefile
 		 src/plugins/proctrack/Makefile
 		 src/plugins/proctrack/cgroup/Makefile
-		 src/plugins/proctrack/cray_aries/Makefile
 		 src/plugins/proctrack/linuxproc/Makefile
 		 src/plugins/proctrack/pgid/Makefile
 		 src/plugins/sched/Makefile
@@ -512,9 +499,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/builtin/Makefile
 		 src/plugins/select/Makefile
 		 src/plugins/select/cons_tres/Makefile
-		 src/plugins/select/cray_aries/Makefile
 		 src/plugins/select/linear/Makefile
-		 src/plugins/select/other/Makefile
 		 src/plugins/serializer/Makefile
 		 src/plugins/serializer/json/Makefile
 		 src/plugins/serializer/url-encoded/Makefile
@@ -522,12 +507,10 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/site_factor/Makefile
 		 src/plugins/site_factor/example/Makefile
 		 src/plugins/switch/Makefile
-		 src/plugins/switch/cray_aries/Makefile
 		 src/plugins/switch/hpe_slingshot/Makefile
 		 src/plugins/task/Makefile
 		 src/plugins/task/affinity/Makefile
 		 src/plugins/task/cgroup/Makefile
-		 src/plugins/task/cray_aries/Makefile
 		 src/plugins/topology/Makefile
 		 src/plugins/topology/3d_torus/Makefile
 		 src/plugins/topology/block/Makefile

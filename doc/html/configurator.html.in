@@ -488,8 +488,6 @@ Select one value for <B>SelectType</B>:<BR>
 <input type="radio" name="select_type" value="cons_tres" checked>
 <b>cons_tres</b>: Allocate individual processors, memory, GPUs, and other
 trackable resources<br />
-<input type="radio" name="select_type" value="cray_aries">
-<B>Cray XC</B>: Cray XC systems running native Slurm without ALPS<BR>
 <input type="radio" name="select_type" value="linear">
 <B>Linear</B>: Node-base
 resource allocation, does not manage individual processor allocation<BR>
@@ -500,8 +498,6 @@ Define a task launch plugin. This may be used to
 provide resource management within a node (e.g. pinning
 tasks to specific processors).
 Select one value for <B>TaskPlugin</B>:<BR>
-<input type="checkbox" name="task_plugin" value="task/cray_aries"> <B>Cray XC</B>: Cray XC proprietary
-task launch<BR>
 <input type="checkbox" name="task_plugin" value="task/none"> <B>None</B>: No task launch actions<BR>
 <input type="checkbox" name="task_plugin" value="task/affinity" checked> <B>Affinity</B>:
 CPU affinity support
@@ -698,6 +694,6 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 <hr>
 <p>
 <a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
-Last modified 17 June 2020</p>
+Last modified 04 January 2024</p>
 </body>
 </html>

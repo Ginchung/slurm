@@ -235,6 +235,8 @@ static void _add_field(data_t *obj, data_t *required,
 static void _add_param_flag_enum(data_t *param, const parser_t *parser)
 {
 	data_t *fenums = data_set_list(data_key_set(param, "enum"));
+	data_set_string(data_key_set(param, "type"),
+		openapi_type_format_to_type_string(OPENAPI_FORMAT_STRING));
 
 	for (int i = 0; i < parser->flag_bit_array_count; i++)
 		if (!parser->flag_bit_array[i].hidden)
@@ -505,9 +507,12 @@ static void _replace_refs(data_t *data, spec_args_t *sargs)
 			}
 		}
 
-		if (!parser)
-			fatal_abort("%s: unknown %s",
-				    __func__, data_get_string(ref));
+		if (!parser) {
+			debug("%s: skipping unknown %s",
+			      __func__, data_get_string(data));
+			data_set_null(data);
+			return;
+		}
 
 		_set_ref(data, NULL, parser, sargs);
 	} else {

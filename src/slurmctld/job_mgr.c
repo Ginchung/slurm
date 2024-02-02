@@ -540,8 +540,8 @@ static void _resp_array_add(resp_array_struct_t **resp, job_record_t *job_ptr,
 			bit_alloc(max_array_size);
 	}
 	loc_resp->resp_array_cnt++;
-	return;
 }
+
 /* Add record to resp_array_struct_t, free with _resp_array_free().
  * This is a variant of _resp_array_add for the case where a job/task ID
  * is not found, so we use a dummy job record based upon the input IDs. */
@@ -2485,7 +2485,7 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 	assoc_mgr_unlock(&locks);
 
 	build_node_details(job_ptr, false);	/* set node_addr */
-	gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+	gres_ctld_job_build_details(job_ptr->gres_list_alloc, job_ptr->nodes,
 				    &job_ptr->gres_detail_cnt,
 				    &job_ptr->gres_detail_str,
 				    &job_ptr->gres_used);
@@ -3956,6 +3956,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 				(void) gs_job_start(job_ptr);
 				gres_ctld_job_build_details(
 					job_ptr->gres_list_alloc,
+					job_ptr->nodes,
 					&job_ptr->gres_detail_cnt,
 					&job_ptr->gres_detail_str,
 					&job_ptr->gres_used);
@@ -6008,7 +6009,6 @@ static void _signal_batch_job(job_record_t *job_ptr, uint16_t signal,
 	agent_args->msg_args = signal_tasks_msg;
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
 
 /*
@@ -7080,8 +7080,6 @@ static void _set_tot_license_req(job_desc_msg_t *job_desc,
 	xfree(job_desc->licenses_tot);
 	job_desc->licenses_tot = lic_req;
 	lic_req = NULL;
-
-	return;
 }
 
 /*
@@ -7253,6 +7251,14 @@ static int _job_create(job_desc_msg_t *job_desc, int allocate, int will_run,
 		info("Job's requested licenses are invalid: %s",
 		     job_desc->licenses_tot);
 		error_code = ESLURM_INVALID_LICENSES;
+		goto cleanup_fail;
+	}
+
+	if ((job_desc->bitflags & GRES_ONE_TASK_PER_SHARING) &&
+	     (!(slurm_conf.select_type_param & MULTIPLE_SHARING_GRES_PJ))){
+		info("%s: one-task-per-sharing requires MULTIPLE_SHARING_GRES_PJ",
+		     __func__);
+		error_code = ESLURM_INVALID_GRES;
 		goto cleanup_fail;
 	}
 
@@ -9547,8 +9553,6 @@ extern void job_set_alloc_tres(job_record_t *job_ptr, bool assoc_mgr_locked)
 
 	if (!assoc_mgr_locked)
 		assoc_mgr_unlock(&locks);
-
-	return;
 }
 
 /*
@@ -9623,7 +9627,6 @@ static void _job_timed_out(job_record_t *job_ptr, bool preempted)
 		deallocate_nodes(job_ptr, !preempted, false, preempted);
 	} else
 		job_signal(job_ptr, SIGKILL, 0, 0, false);
-	return;
 }
 
 /* _validate_job_desc - validate that a job descriptor for job submit or
@@ -9660,7 +9663,8 @@ static int _validate_job_desc(job_desc_msg_t *job_desc_msg, int allocate,
 		debug("%s: job failed to specify group", __func__);
 		return ESLURM_GROUP_ID_MISSING;
 	}
-	if (!job_desc_msg->work_dir || !job_desc_msg->work_dir[0]) {
+	if (!job_desc_msg->container_id && !job_desc_msg->container &&
+	    (!job_desc_msg->work_dir || !job_desc_msg->work_dir[0])) {
 		debug("%s: job working directory has to be set", __func__);
 		return ESLURM_MISSING_WORK_DIR;
 	}
@@ -10718,9 +10722,6 @@ static void _find_node_config(int *cpu_cnt_ptr, int *core_cnt_ptr)
 
 	*cpu_cnt_ptr  = max_cpu_cnt;
 	*core_cnt_ptr = max_core_cnt;
-
-	return;
-
 }
 
 /* pack default job details for "get_job_info" RPC */
@@ -11385,7 +11386,6 @@ static void _merge_job_licenses(job_record_t *shrink_job_ptr,
 	FREE_NULL_LIST(expand_job_ptr->license_list);
 	FREE_NULL_LIST(shrink_job_ptr->license_list);
 	license_job_merge(expand_job_ptr);
-	return;
 }
 
 static void _hold_job_rec(job_record_t *job_ptr, uid_t uid)
@@ -12075,6 +12075,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			FREE_NULL_BITMAP(rem_nodes);
 			(void) gs_job_start(job_ptr);
 			gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+						    job_ptr->nodes,
 						    &job_ptr->gres_detail_cnt,
 						    &job_ptr->gres_detail_str,
 						    &job_ptr->gres_used);
@@ -13756,6 +13757,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			update_accounting = false;
 		}
 		gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+					    job_ptr->nodes,
 					    &job_ptr->gres_detail_cnt,
 					    &job_ptr->gres_detail_str,
 					    &job_ptr->gres_used);
@@ -14692,7 +14694,6 @@ static void _send_job_kill(job_record_t *job_ptr)
 	agent_args->msg_args = kill_job;
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
 
 /* Record accounting information for a job immediately before changing size */
@@ -14909,8 +14910,6 @@ extern void validate_jobs_on_node(slurm_msg_t *slurm_msg)
 		       reg_msg->node_name, reg_msg->job_count, jobs_on_node);
 		reg_msg->job_count = jobs_on_node;
 	}
-
-	return;
 }
 
 /* Purge any batch job that should have its script running on node
@@ -16190,7 +16189,6 @@ static void _signal_job(job_record_t *job_ptr, int signal, uint16_t flags)
 	agent_args->msg_args = signal_job_msg;
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
 
 /* Send suspend request to slumrd of all nodes associated with a job
@@ -16248,7 +16246,6 @@ static void _suspend_job(job_record_t *job_ptr, uint16_t op)
 	agent_args->msg_args = sus_ptr;
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
 
 /*
@@ -16443,7 +16440,6 @@ static int _job_suspend_op(job_record_t *job_ptr, uint16_t op, bool indf_susp)
 		if (!IS_JOB_SUSPENDED(job_ptr))
 			return ESLURM_JOB_NOT_SUSPENDED;
 		rc = _resume_job_nodes(job_ptr, indf_susp);
-		power_g_job_resume(job_ptr);
 		if (rc != SLURM_SUCCESS)
 			return rc;
 		_suspend_job(job_ptr, op);
@@ -18999,4 +18995,35 @@ extern slurm_node_alias_addrs_t *build_alias_addrs(job_record_t *job_ptr)
 	alias_addrs->node_list = xstrdup(job_ptr->nodes);
 
 	return alias_addrs;
+}
+
+extern uint16_t job_mgr_determine_cpus_per_core(
+	job_details_t *details, int node_inx)
+{
+	uint16_t ncpus_per_core = INFINITE16;	/* Usable CPUs per core */
+	uint16_t threads_per_core = node_record_table_ptr[node_inx]->tpc;
+
+	if ((slurm_conf.select_type_param & CR_ONE_TASK_PER_CORE) &&
+	    (details->min_gres_cpu > 0)) {
+		/* May override default of 1 CPU per core */
+		return node_record_table_ptr[node_inx]->tpc;
+	}
+
+	if (details && details->mc_ptr) {
+		multi_core_data_t *mc_ptr = details->mc_ptr;
+		if ((mc_ptr->ntasks_per_core != INFINITE16) &&
+		    (mc_ptr->ntasks_per_core)) {
+			ncpus_per_core = MIN(threads_per_core,
+					     (mc_ptr->ntasks_per_core *
+					      details->cpus_per_task));
+		}
+		if ((mc_ptr->threads_per_core != NO_VAL16) &&
+		    (mc_ptr->threads_per_core <  ncpus_per_core)) {
+			ncpus_per_core = mc_ptr->threads_per_core;
+		}
+	}
+
+	threads_per_core = MIN(threads_per_core, ncpus_per_core);
+
+	return threads_per_core;
 }

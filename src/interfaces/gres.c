@@ -3274,8 +3274,8 @@ extern void gres_init_node_config(char *orig_config, List *gres_list)
 				gres_state_node_shared->gres_data;
 			gres_node_state_t *gres_ns_sharing =
 				gres_state_node_sharing->gres_data;
-			gres_ns_shared->alt_gres_ns = gres_ns_sharing;
-			gres_ns_sharing->alt_gres_ns = gres_ns_shared;
+			gres_ns_shared->alt_gres = gres_state_node_sharing;
+			gres_ns_sharing->alt_gres = gres_state_node_shared;
 		}
 	}
 }
@@ -3911,10 +3911,11 @@ static void _sync_node_shared_to_sharing(gres_state_t *sharing_gres_state_node)
 		return;
 
 	sharing_gres_ns = sharing_gres_state_node->gres_data;
-	shared_gres_ns = sharing_gres_ns->alt_gres_ns;
 
-	if (!shared_gres_ns)
+	if (!sharing_gres_ns->alt_gres)
 		return;
+
+	shared_gres_ns = sharing_gres_ns->alt_gres->gres_data;
 
 	sharing_cnt = sharing_gres_ns->gres_cnt_avail;
 	if (shared_gres_ns->gres_bit_alloc) {
@@ -6397,12 +6398,11 @@ static bool _validate_node_gres_type(uint32_t job_id, List job_gres_list,
 	job_gres_iter = list_iterator_create(job_gres_list);
 	while ((gres_state_job = (gres_state_t *) list_next(job_gres_iter))) {
 		gres_js = gres_state_job->gres_data;
-		if (!gres_js || !gres_js->gres_bit_alloc)
-			continue;
-		if ((node_inx >= gres_js->node_cnt) ||
+		if (!gres_js ||
+		    !gres_js->type_id ||
+		    !gres_js->gres_bit_alloc ||
+		    (gres_js->node_cnt <= node_inx) ||
 		    !gres_js->gres_bit_alloc[node_inx])
-			continue;
-		if (gres_js->type_id == NO_VAL)
 			continue;
 
 		if (!node_gres_list)

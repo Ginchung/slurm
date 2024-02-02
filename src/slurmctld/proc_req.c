@@ -308,7 +308,6 @@ static void _fill_ctld_conf(slurm_conf_t *conf_ptr)
 		conf_ptr->control_machine[i] =
 			xstrdup(conf->control_machine[i]);
 	}
-	conf_ptr->core_spec_plugin    = xstrdup(conf->core_spec_plugin);
 	conf_ptr->cpu_freq_def        = conf->cpu_freq_def;
 	conf_ptr->cpu_freq_govs       = conf->cpu_freq_govs;
 	conf_ptr->cred_type           = xstrdup(conf->cred_type);
@@ -2332,22 +2331,6 @@ static void _slurm_rpc_job_step_create(slurm_msg_t *msg)
 #endif
 
 	if (!(msg->flags & CTLD_QUEUE_PROCESSING)) {
-#if defined HAVE_NATIVE_CRAY
-		slurm_mutex_lock(&slurmctld_config.thread_count_lock);
-		if (LOTS_OF_AGENTS ||
-		    (slurmctld_config.server_thread_count >= 128)) {
-			/*
-			 * Don't start more steps if system is very busy right
-			 * now. Getting cray network switch cookie is slow and
-			 * happens with job write lock set.
-			 */
-			slurm_send_rc_msg(msg, EAGAIN);
-			slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
-			return;
-		}
-		slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
-#endif
-
 		_throttle_start(&active_rpc_cnt);
 		lock_slurmctld(job_write_lock);
 	}
@@ -3244,6 +3227,7 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t *msg)
 	if (error_code);
 	else if (msg->msg_type == REQUEST_CONTROL) {
 		info("Performing RPC: REQUEST_CONTROL");
+		slurm_mutex_lock(&slurmctld_config.backup_finish_lock);
 		/* resume backup mode */
 		slurmctld_config.resume_backup = true;
 	} else {
@@ -3297,11 +3281,10 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t *msg)
 		 */
 		ts.tv_sec = now + CONTROL_TIMEOUT - 1;
 
-		slurm_mutex_lock(&slurmctld_config.thread_count_lock);
 		slurm_cond_timedwait(&slurmctld_config.backup_finish_cond,
-				     &slurmctld_config.thread_count_lock,
+				     &slurmctld_config.backup_finish_lock,
 				     &ts);
-		slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
+		slurm_mutex_unlock(&slurmctld_config.backup_finish_lock);
 
 		if (slurmctld_config.resume_backup)
 			error("%s: REQUEST_CONTROL reply but backup not completely done relinquishing control.  Old state possible", __func__);
@@ -5009,10 +4992,15 @@ static void _slurm_rpc_trigger_set(slurm_msg_t *msg)
 	trigger_info_msg_t *trigger_ptr = msg->data;
 	bool allow_user_triggers = xstrcasestr(slurm_conf.slurmctld_params,
 	                                       "allow_user_triggers");
+	bool disable_triggers = xstrcasestr(slurm_conf.slurmctld_params,
+					    "disable_triggers");
 	DEF_TIMERS;
 
 	START_TIMER;
-	if (validate_slurm_user(msg->auth_uid) || allow_user_triggers) {
+	if (disable_triggers) {
+		rc = ESLURM_DISABLED;
+		error("Request to set trigger, but disable_triggers is set.");
+	} else if (validate_slurm_user(msg->auth_uid) || allow_user_triggers) {
 		rc = trigger_set(msg->auth_uid, msg->auth_gid, trigger_ptr);
 	} else {
 		rc = ESLURM_ACCESS_DENIED;
@@ -5048,7 +5036,6 @@ static void _slurm_rpc_get_topo(slurm_msg_t *msg)
 {
 	topo_info_response_msg_t *topo_resp_msg;
 	slurm_msg_t response_msg;
-	int i;
 	/* Locks: read node lock */
 	slurmctld_lock_t node_read_lock = {
 		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
@@ -5058,24 +5045,10 @@ static void _slurm_rpc_get_topo(slurm_msg_t *msg)
 	START_TIMER;
 	lock_slurmctld(node_read_lock);
 	if (msg->protocol_version >= SLURM_23_11_PROTOCOL_VERSION) {
-		topology_g_topology_get(&topo_resp_msg->topo_info);
+		(void) topology_g_get(TOPO_DATA_TOPOLOGY_PTR,
+				      &topo_resp_msg->topo_info);
 	} else {
-		topo_resp_msg->record_count = switch_record_cnt;
-		topo_resp_msg->topo_array =
-			xmalloc(sizeof(topo_info_t) *
-				topo_resp_msg->record_count);
-		for (i=0; i<topo_resp_msg->record_count; i++) {
-			topo_resp_msg->topo_array[i].level =
-				switch_record_table[i].level;
-			topo_resp_msg->topo_array[i].link_speed =
-				switch_record_table[i].link_speed;
-			topo_resp_msg->topo_array[i].name =
-				xstrdup(switch_record_table[i].name);
-			topo_resp_msg->topo_array[i].nodes =
-				xstrdup(switch_record_table[i].nodes);
-			topo_resp_msg->topo_array[i].switches =
-				xstrdup(switch_record_table[i].switches);
-		}
+		topo_resp_msg->record_count = 0;
 	}
 	unlock_slurmctld(node_read_lock);
 	END_TIMER2(__func__);
@@ -5504,11 +5477,12 @@ static void _slurm_rpc_accounting_update_msg(slurm_msg_t *msg)
 static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 {
 	int rc;
+	char *err_msg = NULL;
 #ifndef HAVE_FRONT_END
 	node_record_t *node_ptr;
 	reboot_msg_t *reboot_msg = msg->data;
 	char *nodelist = NULL;
-	bitstr_t *bitmap = NULL;
+	bitstr_t *bitmap = NULL, *cannot_reboot_nodes = NULL;
 	/* Locks: write node lock */
 	slurmctld_lock_t node_write_lock = {
 		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
@@ -5524,6 +5498,7 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		return;
 	}
 #ifdef HAVE_FRONT_END
+	err_msg = xstrdup("Node reboot is not supported in configuration when Slurm is built with --enable-front-end node support.");
 	rc = ESLURM_NOT_SUPPORTED;
 #else
 	/* do RPC call */
@@ -5545,6 +5520,7 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		}
 	}
 
+	cannot_reboot_nodes = bit_alloc(node_record_count);
 	lock_slurmctld(node_write_lock);
 	for (int i = 0; (node_ptr = next_node_bitmap(bitmap, &i)); i++) {
 		if (IS_NODE_FUTURE(node_ptr) ||
@@ -5554,6 +5530,10 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		    IS_NODE_POWERED_DOWN(node_ptr) ||
 		    IS_NODE_POWERING_DOWN(node_ptr)) {
 			bit_clear(bitmap, node_ptr->index);
+			bit_set(cannot_reboot_nodes, node_ptr->index);
+			debug2("Skipping reboot of node %s in state %s",
+			       node_ptr->name,
+			       node_state_string(node_ptr->node_state));
 			continue;
 		}
 		node_ptr->node_state |= NODE_STATE_REBOOT_REQUESTED;
@@ -5602,11 +5582,19 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		info("reboot request queued for nodes %s", nodelist);
 		xfree(nodelist);
 	}
+	if (bit_ffs(cannot_reboot_nodes) != -1) {
+		nodelist = bitmap2node_name(cannot_reboot_nodes);
+		xstrfmtcat(err_msg, "Skipping reboot of nodes %s due to current node state.",
+			   nodelist);
+		xfree(nodelist);
+	}
+	FREE_NULL_BITMAP(cannot_reboot_nodes);
 	FREE_NULL_BITMAP(bitmap);
 	rc = SLURM_SUCCESS;
 #endif
 	END_TIMER2(__func__);
-	slurm_send_rc_msg(msg, rc);
+	slurm_send_rc_err_msg(msg, rc, err_msg);
+	xfree(err_msg);
 }
 
 static void _slurm_rpc_accounting_first_reg(slurm_msg_t *msg)
@@ -6198,7 +6186,6 @@ static void _proc_multi_msg(slurm_msg_t *msg)
 	slurm_send_node_msg(msg->conn_fd, &response_msg);
 	FREE_NULL_LIST(full_resp_list);
 	FREE_NULL_BUFFER(resp_buf);
-	return;
 }
 
 /* Route msg to federated job's origin.

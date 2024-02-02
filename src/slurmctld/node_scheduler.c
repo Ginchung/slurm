@@ -169,6 +169,20 @@ static uint16_t _get_ntasks_per_core(job_details_t *details)
 extern void allocate_nodes(job_record_t *job_ptr)
 {
 	node_record_t *node_ptr;
+
+	for (int i = 0; (node_ptr = next_node_bitmap(job_ptr->node_bitmap, &i));
+	     i++) {
+		make_node_alloc(node_ptr, job_ptr);
+	}
+
+	last_node_update = time(NULL);
+	license_job_get(job_ptr, false);
+	set_initial_job_alias_list(job_ptr);
+}
+
+extern void set_initial_job_alias_list(job_record_t *job_ptr)
+{
+	node_record_t *node_ptr;
 	bool has_cloud = false, has_cloud_power_save = false;
 	bool has_dynamic_norm = false;
 
@@ -189,11 +203,7 @@ extern void allocate_nodes(job_record_t *job_ptr)
 			    IS_NODE_POWERING_UP(node_ptr))
 				has_cloud_power_save = true;
 		}
-		make_node_alloc(node_ptr, job_ptr);
 	}
-
-	last_node_update = time(NULL);
-	license_job_get(job_ptr, false);
 
 	if (has_cloud) {
 		if (has_cloud_power_save &&
@@ -213,8 +223,6 @@ extern void allocate_nodes(job_record_t *job_ptr)
 		/* set addrs if the job is coming from a different cluster */
 		set_job_node_addrs(job_ptr, job_ptr->origin_cluster);
 	}
-
-	return;
 }
 
 /*
@@ -304,10 +312,8 @@ extern void set_job_features_use(job_details_t *details_ptr)
 extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 			     bool suspended, bool preempted)
 {
-	int node_count = 0;
 	kill_job_msg_t *kill_job = NULL;
 	agent_arg_t *agent_args = NULL;
-	int down_node_cnt = 0;
 	node_record_t *node_ptr;
 	hostlist_t *hostlist = NULL;
 	uint16_t use_protocol_version = 0;
@@ -341,7 +347,6 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 			/* Issue the KILL RPC, but don't verify response */
 			front_end_ptr->job_cnt_comp = 0;
 			front_end_ptr->job_cnt_run  = 0;
-			down_node_cnt++;
 			if (job_ptr->node_bitmap_cg) {
 				bit_clear_all(job_ptr->node_bitmap_cg);
 			} else {
@@ -383,7 +388,6 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 
 		if (hostlist)
 			hostlist_push_host(hostlist, job_ptr->batch_host);
-		node_count++;
 	}
 #else
 	if (!job_ptr->node_bitmap_cg)
@@ -397,7 +401,6 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 		    IS_NODE_POWERED_DOWN(node_ptr) ||
 		    IS_NODE_POWERING_UP(node_ptr)) {
 			/* Issue the KILL RPC, but don't verify response */
-			down_node_cnt++;
 			bit_clear(job_ptr->node_bitmap_cg, i);
 			job_update_tres_cnt(job_ptr, i);
 			/*
@@ -413,9 +416,11 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 
 		if (use_protocol_version > node_ptr->protocol_version)
 			use_protocol_version = node_ptr->protocol_version;
-		if (hostlist)
+		if (hostlist &&
+		    !IS_NODE_POWERED_DOWN(node_ptr) &&
+		    !IS_NODE_POWERING_UP(node_ptr)) {
 			hostlist_push_host(hostlist, node_ptr->name);
-		node_count++;
+		}
 		if (PACK_FANOUT_ADDRS(node_ptr))
 			msg_flags |= SLURM_PACK_ADDRS;
 	}
@@ -452,17 +457,13 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 		return;
 	}
 
-	if ((node_count - down_node_cnt) == 0) {
+	if (!job_ptr->node_cnt) {
 		/* Can not wait for epilog complete to release licenses and
 		 * update gang scheduling table */
 		cleanup_completing(job_ptr);
 	}
 
-	if (node_count == 0) {
-		if (job_ptr->details->expanding_jobid == 0) {
-			error("%s: %pJ allocated no nodes to be killed on",
-			      __func__, job_ptr);
-		}
+	if (!hostlist || !hostlist_count(hostlist)) {
 		hostlist_destroy(hostlist);
 		return;
 	}
@@ -477,7 +478,7 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 	agent_args->retry = 0;	/* re_kill_job() resends as needed */
 	agent_args->protocol_version = use_protocol_version;
 	agent_args->hostlist = hostlist;
-	agent_args->node_count = node_count;
+	agent_args->node_count = hostlist_count(hostlist);
 	agent_args->msg_flags = msg_flags;
 
 	last_node_update = time(NULL);
@@ -487,7 +488,6 @@ extern void deallocate_nodes(job_record_t *job_ptr, bool timeout,
 	agent_args->msg_args = kill_job;
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
 
 static void _log_feature_nodes(job_feature_t  *job_feat_ptr)
@@ -689,8 +689,6 @@ extern void build_active_feature_bitmap(job_record_t *job_ptr,
 	}
 	bit_and(tmp_bitmap, avail_bitmap);
 	*active_bitmap = tmp_bitmap;
-
-	return;
 }
 
 /* Return bitmap of nodes with all specified features currently active */
@@ -1596,6 +1594,12 @@ static int _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	 */
 	uint64_t smallest_min_mem = INFINITE64;
 	uint64_t orig_req_mem = job_ptr->details->pn_min_memory;
+	static int loc_topo_record_cnt = -1;
+
+	if (loc_topo_record_cnt == -1) {
+		loc_topo_record_cnt = 0;
+		(void) topology_g_get(TOPO_DATA_REC_CNT, &loc_topo_record_cnt);
+	}
 
 	if (test_only)
 		select_mode = SELECT_MODE_TEST_ONLY;
@@ -1839,7 +1843,7 @@ static int _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			}
 
 			if ((shared || preempt_flag ||
-			    (switch_record_cnt > 1))     &&
+			    (loc_topo_record_cnt > 1))     &&
 			    ((i+1) < node_set_size)	 &&
 			    (min_feature == max_feature) &&
 			    (node_set_ptr[i].sched_weight ==
@@ -2261,7 +2265,8 @@ static void _handle_explicit_req(void *x, void *arg)
 	list_t **ret_gres_list = arg;
 
 	/* Copy over the explicit gres, skip others */
-	if (!(gres_state_job->config_flags & GRES_CONF_EXPLICIT))
+	if (!(gres_state_job->config_flags & GRES_CONF_EXPLICIT) &&
+	    !gres_id_shared(gres_state_job->config_flags))
 		return;
 
 	if (!*ret_gres_list)
@@ -2273,8 +2278,6 @@ static void _handle_explicit_req(void *x, void *arg)
 			    GRES_STATE_SRC_STATE_PTR,
 			    GRES_STATE_TYPE_JOB,
 			    gres_job_state_dup(gres_state_job->gres_data)));
-
-	return;
 }
 
 static void _gres_select_explicit(
@@ -2822,7 +2825,6 @@ extern int select_nodes(job_record_t *job_ptr, bool test_only,
 	prolog_slurmctld(job_ptr);
 	reboot_job_nodes(job_ptr);
 	gs_job_start(job_ptr);
-	power_g_job_start(job_ptr);
 
 	if (bit_overlap_any(job_ptr->node_bitmap, power_node_bitmap)) {
 		job_ptr->job_state |= JOB_POWER_UP_NODE;
@@ -4549,5 +4551,4 @@ extern void re_kill_job(job_record_t *job_ptr)
 		create_kill_job_msg(job_ptr, agent_args->protocol_version);
 	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
-	return;
 }
